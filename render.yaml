@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: leadfunnel-mcp
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: SF_DOMAIN
+        sync: false
+      - key: SF_CLIENT_ID
+        sync: false
+      - key: SF_CLIENT_SECRET
+        sync: false
+      - key: MCP_TOKEN
+        sync: false
+      - key: ENMASCARAR_PII
+        value: "true"
