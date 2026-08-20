@@ -75,7 +75,8 @@ function crearCliente({ token, inst }) {
   };
 
   // Ejecuta una query por lotes de 200 ids, en paralelo de a 5
-  const queryBatched = async (ids, soqlFn, concurrencia = 5) => {
+  const queryBatched = async (ids, soqlFn, opts = {}) => {
+    const { concurrencia = 5, quote = true } = opts;
     const lotes = [];
     for (let i = 0; i < ids.length; i += 200) lotes.push(ids.slice(i, i + 200));
 
@@ -83,7 +84,9 @@ function crearCliente({ token, inst }) {
     for (let i = 0; i < lotes.length; i += concurrencia) {
       const grupo = lotes.slice(i, i + concurrencia);
       const resultados = await Promise.all(
-        grupo.map(lote => query(soqlFn(lote.map(x => `'${x}'`).join(","))))
+        grupo.map(lote => query(soqlFn(
+          lote.map(x => quote ? `'${x}'` : x).join(",")
+        )))
       );
       resultados.forEach(r => out.push(...(r.records || [])));
     }
@@ -147,12 +150,16 @@ export async function cargarLeads(opts = {}) {
   });
 
   // 4. Contact por DNI
-  const limpiarDni = (d) => (d || "").toString().replace(/[.\s]/g, "");
-  const dnis = [...new Set(records.map(r => limpiarDni(r.N_mero_de_documento__c)).filter(Boolean))];
+  const limpiarDni = (d) => (d || "").toString().replace(/[.\s-]/g, "");
+  const dnis = [...new Set(
+    records.map(r => limpiarDni(r.N_mero_de_documento__c))
+      .filter(d => /^\d{6,9}$/.test(d))   // solo numéricos válidos
+  )];
 
   const contactRecs = await sf.queryBatched(dnis, ids =>
     `SELECT Id, Numero_de_documento__c, Admitido__c FROM Contact
-     WHERE Numero_de_documento__c IN (${ids})`);
+     WHERE Numero_de_documento__c IN (${ids})`,
+    { quote: false });
 
   const contactByDni = {}, dniByContact = {};
   contactRecs.forEach(c => {
