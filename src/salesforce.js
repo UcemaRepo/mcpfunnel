@@ -105,7 +105,7 @@ export async function cargarLeads(opts = {}) {
 
   const ownerIn    = ASESOR_IDS.map(i => `'${i}'`).join(",");
   const semestreIn = SEMESTRES_ACTIVOS.map(s => `'${s}'`).join(",");
-  const desde      = opts.desde || "2026-02-01T00:00:00Z";
+  const desde      = opts.desde || "2024-02-01T00:00:00Z";
 
   // 1. Formulario_web__c (paginado completo)
   const records = await sf.queryAll(`SELECT Id, Nombres__c, Apellidos__c,
