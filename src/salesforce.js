@@ -3,13 +3,12 @@
 // ============================================================
 
 import {
-  depurar, agregar, estadoPri, normalizeStatus,
-  extractProg, extractNota, esProgramaValido,
-} from "./scoring.js";
+  transformar, agregarPorCohorte, estadoPri, normalizeStatus,
+  extractProg, extractNota, esProgramaValido, contarEmbudo, tasas,
+} from "./transform.js";
 
 const API = "v59.0";
 
-// IDs de los 6 asesores activos
 const ASESOR_IDS = [
   "005VJ000002riJVYAY",
   "005VJ0000031rVBYAY",
@@ -19,12 +18,14 @@ const ASESOR_IDS = [
   "005VJ000000taFmYAI",
 ];
 
-// Semestres futuros activos. Los vacíos entran aparte (ver WHERE).
-const SEMESTRES_ACTIVOS = [
+// Cohortes a traer. Incluye 2026SEM1 para poder comparar contra
+// el ciclo anterior. Las variantes cubren el tipeo inconsistente
+// del picklist en Salesforce.
+const SEMESTRES = [
+  "2026SEM 1", "2026SEM1", "2026 SEM 1",
   "2026SEM 2", "2026SEM2", "2026 SEM 2",
   "2027SEM 1", "2027SEM1", "2027 SEM 1",
   "2028SEM 1", "2028SEM1", "2028 SEM 1",
-  "2026SEM 1", "2026SEM1", "2026 SEM 1",
 ];
 
 // ── Auth ────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ async function autenticar() {
   return { token: data.access_token, inst: data.instance_url };
 }
 
-// ── Helpers de query ────────────────────────────────────────
+// ── Cliente ─────────────────────────────────────────────────
 function crearCliente({ token, inst }) {
   const get = async (url) => {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -63,7 +64,6 @@ function crearCliente({ token, inst }) {
   const query = (soql) =>
     get(`${inst}/services/data/${API}/query?q=${encodeURIComponent(soql)}`);
 
-  // Query paginada completa
   const queryAll = async (soql) => {
     let out = [];
     let data = await query(soql);
@@ -75,7 +75,8 @@ function crearCliente({ token, inst }) {
     return out;
   };
 
-  // Ejecuta una query por lotes de 200 ids, en paralelo de a 5
+  // quote:false para campos NUMÉRICOS como Numero_de_documento__c.
+  // Salesforce rechaza un IN con comillas sobre un campo double.
   const queryBatched = async (ids, soqlFn, opts = {}) => {
     const { concurrencia = 5, quote = true } = opts;
     const lotes = [];
@@ -104,10 +105,14 @@ export async function cargarLeads(opts = {}) {
   const sf = crearCliente(creds);
 
   const ownerIn    = ASESOR_IDS.map(i => `'${i}'`).join(",");
-  const semestreIn = SEMESTRES_ACTIVOS.map(s => `'${s}'`).join(",");
-  const desde      = opts.desde || "2024-02-01T00:00:00Z";
+  const semestreIn = SEMESTRES.map(s => `'${s}'`).join(",");
+  const desde      = opts.desde || "2025-01-01T00:00:00Z";
 
-  // 1. Formulario_web__c (paginado completo)
+  // Para comparar cohortes históricas conviene NO filtrar por
+  // owner: los leads de asesores que ya no están quedarían fuera
+  // y subestimarían el ciclo anterior.
+  const filtroOwner = opts.todosLosAsesores ? "" : `AND OwnerId IN (${ownerIn})`;
+
   const records = await sf.queryAll(`SELECT Id, Nombres__c, Apellidos__c,
     N_mero_de_documento__c, Telefono__c, Correo_electronico__c,
     Colegio_Universidad__c, Origen_del_candidato__c, Beca_de_inter_s__c,
@@ -118,13 +123,13 @@ export async function cargarLeads(opts = {}) {
     OwnerId, Owner.Name, CreatedDate, LastModifiedDate
     FROM Formulario_web__c
     WHERE CreatedDate >= ${desde}
-    AND OwnerId IN (${ownerIn})
-    AND (Cuando_Ingresarias__c IN (${semestreIn}) OR Cuando_Ingresarias__c = null)
+    ${filtroOwner}
+    AND Cuando_Ingresarias__c IN (${semestreIn})
     ORDER BY CreatedDate DESC`);
 
   const candidatoIds = [...new Set(records.map(r => r.Candidato__c).filter(Boolean))];
 
-  // 2 y 3. Lead.Status y CampaignMember, en paralelo
+  // Lead y CampaignMember en paralelo
   const [leadRecs, cmRecs] = await Promise.all([
     sf.queryBatched(candidatoIds, ids =>
       `SELECT Id, Status FROM Lead WHERE Id IN (${ids})`),
@@ -150,17 +155,19 @@ export async function cargarLeads(opts = {}) {
     }
   });
 
-  // 4. Contact por DNI
+  // Contact por DNI (numérico, sin comillas)
   const limpiarDni = (d) => (d || "").toString().replace(/[.\s-]/g, "");
   const dnis = [...new Set(
     records.map(r => limpiarDni(r.N_mero_de_documento__c))
-      .filter(d => /^\d{6,9}$/.test(d))   // solo numéricos válidos
+      .filter(d => /^\d{6,9}$/.test(d))
   )];
 
-  const contactRecs = await sf.queryBatched(dnis, ids =>
-    `SELECT Id, Numero_de_documento__c, Admitido__c FROM Contact
-     WHERE Numero_de_documento__c IN (${ids})`,
-    { quote: false });
+  const contactRecs = dnis.length
+    ? await sf.queryBatched(dnis, ids =>
+        `SELECT Id, Numero_de_documento__c, Admitido__c FROM Contact
+         WHERE Numero_de_documento__c IN (${ids})`,
+        { quote: false })
+    : [];
 
   const contactByDni = {}, dniByContact = {};
   contactRecs.forEach(c => {
@@ -170,15 +177,16 @@ export async function cargarLeads(opts = {}) {
     dniByContact[c.Id] = dni;
   });
 
-  // 5. Feedback solo de admitidos/convertidos
-  const contactIds = [];
+  // Feedback de admitidos y convertidos
+  const contactIdsSet = new Set();
   for (const r of records) {
     const c = contactByDni[limpiarDni(r.N_mero_de_documento__c)];
     if (!c) continue;
     const conv = estadoPri(cmMap[r.Candidato__c]?.best || "") === 7
       || (r.Estado_del_Candidato2__c || "").toLowerCase() === "qualified";
-    if ((c.admitido || conv) && !contactIds.includes(c.id)) contactIds.push(c.id);
+    if (c.admitido || conv) contactIdsSet.add(c.id);
   }
+  const contactIds = [...contactIdsSet];
 
   const notaByDni = {};
   if (contactIds.length) {
@@ -193,7 +201,7 @@ export async function cargarLeads(opts = {}) {
     });
   }
 
-  // ── Depuración ────────────────────────────────────────────
+  // ── Transformación ────────────────────────────────────────
   const enmascarar = process.env.ENMASCARAR_PII !== "false";
   const campanasDescartadas = new Set();
 
@@ -218,20 +226,41 @@ export async function cargarLeads(opts = {}) {
       else campanasDescartadas.add(p);
     });
 
-    return depurar(r, {
+    const dni = limpiarDni(r.N_mero_de_documento__c);
+
+    return transformar(r, {
       programa: Array.from(progs).join(", "),
       estado,
       campanas: camps,
-      nota: notaByDni[limpiarDni(r.N_mero_de_documento__c)] ?? null,
+      nota: notaByDni[dni] ?? null,
+      // El dato que antes se consultaba y se descartaba
+      admitido: contactByDni[dni]?.admitido === true,
     }, { enmascarar });
   });
+
+  const embudoGlobal = contarEmbudo(leads);
 
   return {
     cargadoEn: new Date().toISOString(),
     duracionMs: Date.now() - t0,
+    desde,
+    todosLosAsesores: !!opts.todosLosAsesores,
     piiEnmascarada: enmascarar,
     leads,
-    agregados: agregar(leads),
+    embudoGlobal,
+    tasasGlobales: tasas(embudoGlobal),
+    porCohorte: agregarPorCohorte(leads),
+
+    // Si el cruce por DNI es pobre, el conteo de admitidos no es
+    // confiable — mejor saberlo que asumir que el número es real.
+    diagnostico: {
+      totalRegistros: records.length,
+      conDniValido: dnis.length,
+      sinDniValido: records.length - dnis.length,
+      contactosEncontrados: contactRecs.length,
+      admitidosDetectados: leads.filter(l => l.admitido).length,
+      feedbacksConNota: Object.keys(notaByDni).length,
+    },
     campanasDescartadas: Array.from(campanasDescartadas).sort(),
   };
 }
