@@ -167,13 +167,38 @@ export async function cargarLeads(opts = {}) {
     dniByContact[c.Id] = dni;
   });
 
+  // ── NUEVO: Consulta masiva a hed__Application__c para mapear admitidos reales ──
+  const admitidosSetByDni = new Set();
+  const admitidosSetByContactId = new Set();
+
+  const appsAdmitidas = await sf.queryAll(`SELECT Id, hed__Applicant__c, hed__Applicant__r.Numero_de_documento__c 
+    FROM hed__Application__c 
+    WHERE (hed__Application_Status__c LIKE '%Admi%' OR hed__Application_Status__c LIKE '%Admit%')
+    AND (NOT hed__Term__r.Name LIKE '%Posgrado%')
+    AND (NOT hed__Term__r.Name LIKE '%Maestría%')
+    AND (NOT hed__Term__r.Name LIKE '%Executive%')`);
+
+  appsAdmitidas.forEach(app => {
+    if (app.hed__Applicant__c) {
+      admitidosSetByContactId.add(app.hed__Applicant__c);
+    }
+    if (app.hed__Applicant__r?.Numero_de_documento__c) {
+      const dniApp = limpiarDni(app.hed__Applicant__r.Numero_de_documento__c);
+      if (dniApp) admitidosSetByDni.add(dniApp);
+    }
+  });
+
   const contactIdsSet = new Set();
   for (const r of records) {
-    const c = contactByDni[limpiarDni(r.N_mero_de_documento__c)];
+    const dni = limpiarDni(r.N_mero_de_documento__c);
+    const c = contactByDni[dni];
     if (!c) continue;
     const conv = estadoPri(cmMap[r.Candidato__c]?.best || "") === 7
       || (r.Estado_del_Candidato2__c || "").toLowerCase() === "qualified";
-    if (c.admitido || conv) contactIdsSet.add(c.id);
+    
+    // Si la solicitud está admitida, la consideramos en la lista de contactos
+    const esAdmitidoReal = c.admitido || admitidosSetByDni.has(dni) || admitidosSetByContactId.has(c.id);
+    if (esAdmitidoReal || conv) contactIdsSet.add(c.id);
   }
   const contactIds = [...contactIdsSet];
 
@@ -216,13 +241,19 @@ export async function cargarLeads(opts = {}) {
     });
 
     const dni = limpiarDni(r.N_mero_de_documento__c);
+    const contactInfo = contactByDni[dni];
+
+    // Se evalúa como admitido si figura en Contact.Admitido__c O si tiene solicitud aprobada en hed__Application__c
+    const esAdmitido = (contactInfo?.admitido === true) 
+      || admitidosSetByDni.has(dni) 
+      || (contactInfo?.id && admitidosSetByContactId.has(contactInfo.id));
 
     return transformar(r, {
       programa: Array.from(progs).join(", "),
       estado,
       campanas: camps,
       nota: notaByDni[dni] ?? null,
-      admitido: contactByDni[dni]?.admitido === true,
+      admitido: esAdmitido,
     }, { enmascarar });
   });
 
@@ -260,7 +291,6 @@ export async function buscarAdmitidos(opts = {}) {
     "(hed__Application_Status__c LIKE '%Admi%' OR hed__Application_Status__c LIKE '%Admit%')"
   ];
 
-  // Filtro por año lectivo o cohorte (soporta match en año o en término)
   if (opts.ano) {
     const anoStr = String(opts.ano);
     whereClauses.push(`(AnoLectivo__c = ${Number(opts.ano)} OR hed__Term__r.Name LIKE '%${anoStr}%')`);
@@ -271,7 +301,6 @@ export async function buscarAdmitidos(opts = {}) {
     whereClauses.push(`hed__Applicant__r.Name LIKE '%${nombreLimpio}%'`);
   }
 
-  // Excluir posgrados con sintaxis SOQL válida
   whereClauses.push("(NOT hed__Term__r.Name LIKE '%Posgrado%')");
   whereClauses.push("(NOT hed__Term__r.Name LIKE '%Maestría%')");
   whereClauses.push("(NOT hed__Term__r.Name LIKE '%Executive%')");
@@ -296,7 +325,6 @@ export async function buscarAdmitidos(opts = {}) {
     LIMIT ${limite}
     OFFSET ${offset}`;
 
-  // Usamos sf.query en lugar de sf.queryAll para respetar el OFFSET y la paginación exacta
   const data = await sf.query(query);
   const records = data.records || [];
 
