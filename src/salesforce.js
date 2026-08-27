@@ -264,33 +264,18 @@ export async function cargarLeads(opts = {}) {
     campanasDescartadas: Array.from(campanasDescartadas).sort(),
   };
 }
-// ── Consulta de Admitidos y Cápitas ──────────────────────────
+// salesforce.js — Consulta directa al objeto de Solicitudes (hed__Application__c)
 export async function buscarAdmitidos(opts = {}) {
   const creds = await autenticar();
   const sf = crearCliente(creds);
 
   let whereClauses = ["hed__Application_Status__c = 'Admit'"];
 
-  // Filtro por Año Lectivo
   if (opts.ano) {
     whereClauses.push(`AnoLectivo__c = ${Number(opts.ano)}`);
   }
 
-  // Filtro por rango de Cápita
-  if (opts.capitaMax !== undefined && opts.capitaMax !== null) {
-    whereClauses.push(`Capita__c <= ${Number(opts.capitaMax)}`);
-  }
-  if (opts.capitaMin !== undefined && opts.capitaMin !== null) {
-    whereClauses.push(`Capita__c >= ${Number(opts.capitaMin)}`);
-  }
-
-  // Filtro por Nombre de Postulante
-  if (opts.nombre) {
-    const nombreLimpio = opts.nombre.replace(/'/g, "\\'");
-    whereClauses.push(`hed__Applicant__r.Name LIKE '%${nombreLimpio}%'`);
-  }
-
-  const limite = Math.min(opts.limite || 50, 100);
+  const limite = Math.min(opts.limite || 200, 500);
 
   const query = `SELECT 
       Id, 
@@ -309,7 +294,7 @@ export async function buscarAdmitidos(opts = {}) {
 
   const records = await sf.queryAll(query);
 
-  return records.map(r => ({
+  const admitidos = records.map(r => ({
     idApplication: r.Id,
     numeroSolicitud: r.Name,
     idContacto: r.hed__Applicant__c,
@@ -317,7 +302,15 @@ export async function buscarAdmitidos(opts = {}) {
     estado: r.hed__Application_Status__c,
     fechaSolicitud: r.hed__Application_Date__c,
     anoLectivo: r.AnoLectivo__c,
-    capita: r.Capita__c,
+    capita: r.Capita__c ?? 0,
     termino: r.hed__Term__r ? r.hed__Term__r.Name : null
   }));
+
+  const totalCapitas = admitidos.reduce((acc, r) => acc + (r.capita || 0), 0);
+
+  return {
+    totalAdmitidos: admitidos.length,
+    totalCapitas: +totalCapitas.toFixed(2),
+    registros: admitidos
+  };
 }
