@@ -5,6 +5,7 @@
 import {
   transformar, agregarPorCohorte, estadoPri, normalizeStatus,
   extractProg, extractNota, esProgramaValido, contarEmbudo, tasas,
+  canonSemestre,
 } from "./transform.js";
 
 const API = "v59.0";
@@ -98,20 +99,6 @@ export async function cargarLeads(opts = {}) {
   const t0 = Date.now();
   const creds = await autenticar();
   const sf = crearCliente(creds);
-
-  // Dentro de cargarLeads() en salesforce.js:
-const item = transformar(r, {
-  programa: Array.from(progs).join(", "),
-  estado,
-  campanas: camps,
-  nota: notaByDni[dni] ?? null,
-  admitido: esAdmitido,
-}, { enmascarar });
-
-item.dni = dni || null;
-item.idCandidato = r.Candidato__c || null;
-item.capita = esAdmitido ? capita : 0;
-return item;
 
   const ownerIn    = ASESOR_IDS.map(i => `'${i}'`).join(",");
   const semestreIn = SEMESTRES.map(s => `'${s}'`).join(",");
@@ -277,6 +264,8 @@ return item;
       admitido: esAdmitido,
     }, { enmascarar });
 
+    item.dni = dni || null;
+    item.idCandidato = r.Candidato__c || null;
     item.capita = esAdmitido ? capita : 0;
     return item;
   });
@@ -384,8 +373,7 @@ export async function buscarAdmitidos(opts = {}) {
   };
 }
 
-// ── Agregación basada en la Sesión Activa del Funnel (Opción 1) ──────────────
-// salesforce.js
+// ── Agregación basada en la Sesión Activa del Funnel ─────────────────────────
 export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   if (!sesionActiva || !sesionActiva.leads) {
     throw new Error("No hay una sesión activa del funnel cargada en memoria.");
