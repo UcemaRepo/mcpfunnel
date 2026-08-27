@@ -1,13 +1,6 @@
 // ============================================================
 // server.js — LeadFunnel MCP sobre Render
 // ============================================================
-// v3: sin score de completitud. El foco es el embudo de admisión
-// (leads → contactados → qualified → admitidos) y la comparación
-// entre cohortes.
-//
-// La sesión vive en RAM. Cuando Render apaga el servicio por
-// inactividad, el proceso muere y los datos se van con él.
-// ============================================================
 
 import express from "express";
 import { z } from "zod";
@@ -25,8 +18,6 @@ app.use(express.json({ limit: "10mb" }));
 let sesion = null;
 
 // ── Auth ────────────────────────────────────────────────────
-// La UI de conectores de Claude no permite headers arbitrarios,
-// así que el token también viaja por query (?k=...).
 function auth(req, res, next) {
   const esperado = process.env.MCP_TOKEN;
   const recibido =
@@ -97,7 +88,6 @@ const texto = (obj) => ({
   content: [{ type: "text", text: JSON.stringify(obj, null, 2) }],
 });
 
-// Filtro común a varias herramientas
 function filtrar(leads, a = {}) {
   const n = (s) => normalizar(s || "");
   let res = leads;
@@ -114,7 +104,6 @@ function filtrar(leads, a = {}) {
   return res;
 }
 
-// Campos de filtro compartidos por varias herramientas
 const filtrosBase = {
   cohorte:  z.string().optional().describe("Cohorte/semestre: 2026S1, 2027S1, 2026S2. También acepta '2027SEM 1'."),
   asesor:   z.string().optional().describe("Nombre o parte del nombre del asesor"),
@@ -133,7 +122,7 @@ function crearServidorMcp() {
   // ── estado_sesion ─────────────────────────────────────────
   server.registerTool("estado_sesion", {
     title: "Estado de la sesión",
-    description: "Indica si hay datos cargados en memoria, cuántos leads, qué cohortes están disponibles y el embudo global. Usar SIEMPRE primero si no se sabe si hay datos.",
+    description: "Indica si hay datos cargados en memoria, cuántos leads, qué cohortes están disponibles y el embudo global.",
     inputSchema: {},
   }, async () => {
     if (!sesion) return sinSesion();
@@ -146,24 +135,17 @@ function crearServidorMcp() {
       embudoGlobal: sesion.embudoGlobal,
       tasasGlobales: sesion.tasasGlobales,
       diagnostico: sesion.diagnostico,
-      advertencias: [
-        sesion.todosLosAsesores
-          ? "Incluye todos los asesores."
-          : "Filtrado por los 6 asesores ACTUALES: las cohortes viejas quedan subcontadas si hubo cambios de equipo. Recargar con todosLosAsesores:true para comparaciones históricas.",
-        "El campo 'admitido' no tiene fecha de admisión: se agrupa por el mes en que entró el lead, no por cuándo fue admitido.",
-      ],
     });
   });
 
   // ── embudo ────────────────────────────────────────────────
   server.registerTool("embudo", {
     title: "Embudo de admisión",
-    description: "Conteos del embudo (leads, contactados, negociando, qualified, admitidos, desiste) y tasas de conversión. Se puede filtrar y desglosar por dimensión. Usar para preguntas sobre volumen y conversión.",
+    description: "Conteos del embudo y tasas de conversión.",
     inputSchema: {
       ...filtrosBase,
-      agrupar_por: z.enum(["cohorte", "asesor", "programa", "origen", "estado", "colegio"])
-        .optional().describe("Dimensión del desglose. Sin esto, devuelve solo el total del filtro."),
-      top: z.number().min(1).max(40).optional().describe("Máximo de grupos a devolver, ordenados por admitidos. Default 20."),
+      agrupar_por: z.enum(["cohorte", "asesor", "programa", "origen", "estado", "colegio"]).optional(),
+      top: z.number().min(1).max(40).optional(),
     },
   }, async (args) => {
     if (!sesion) return sinSesion();
@@ -178,9 +160,6 @@ function crearServidorMcp() {
         .sort((a, b) => b[1].admitidos - a[1].admitidos || b[1].leads - a[1].leads)
         .slice(0, top);
       out.desglose = Object.fromEntries(ordenados);
-      if (Object.keys(grupos).length > top) {
-        out.aviso = `Mostrando ${top} de ${Object.keys(grupos).length} grupos.`;
-      }
     }
     return texto(out);
   });
@@ -188,12 +167,10 @@ function crearServidorMcp() {
   // ── curva_temporal ────────────────────────────────────────
   server.registerTool("curva_temporal", {
     title: "Curva mes a mes",
-    description: "Evolución mensual de una o más cohortes: altas nuevas, acumulado, y admitidos. Permite alinear las cohortes por mes de campaña (mes 1 = primer mes con leads de esa cohorte) para compararlas al mismo punto del ciclo.",
+    description: "Evolución mensual de una o más cohortes.",
     inputSchema: {
-      cohortes: z.array(z.string()).optional()
-        .describe("Cohortes a incluir, ej. ['2026S1','2027S1']. Sin esto, todas."),
-      alinear: z.boolean().optional()
-        .describe("true = alinea por mes de campaña en vez de mes calendario. Recomendado para comparar ciclos."),
+      cohortes: z.array(z.string()).optional(),
+      alinear: z.boolean().optional(),
       asesor: z.string().optional(),
       origen: z.string().optional(),
     },
@@ -206,9 +183,7 @@ function crearServidorMcp() {
 
     const out = {};
     for (const c of cohortes) {
-      const ls = filtrar(sesion.leads, {
-        cohorte: c, asesor: args.asesor, origen: args.origen,
-      });
+      const ls = filtrar(sesion.leads, { cohorte: c, asesor: args.asesor, origen: args.origen });
       if (!ls.length) { out[c] = { error: "Sin datos para este filtro." }; continue; }
 
       const porMes = {};
@@ -236,68 +211,55 @@ function crearServidorMcp() {
       out[c] = { totalLeads: ls.length, mesesConActividad: meses.length, curva };
     }
 
-    return texto({
-      alineado: !!args.alinear,
-      nota: args.alinear
-        ? "mesCampana 1 = primer mes con leads de esa cohorte. Comparar filas del mismo mesCampana."
-        : "Meses calendario. Cohortes distintas arrancan en meses distintos: para comparar ciclos, usar alinear:true.",
-      advertencia: "Los admitidos se ubican en el mes en que ENTRÓ el lead, no en el mes en que fue admitido. Una cohorte reciente tiene menos tiempo transcurrido para admitir.",
-      cohortes: out,
-    });
+    return texto({ alineado: !!args.alinear, cohortes: out });
   });
 
-// server.js — Agregás este bloque dentro de crearServidorMcp()
-
-  server.registerTool(
-    "buscar_admitidos",
-    {
-      title: "Buscar admitidos y cápitas de Grado",
-      description: "Consulta directamente en hed__Application__c los postulantes admitidos con su valor de cápita. No depende de la sesión de leads en RAM.",
-      inputSchema: {
-        ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
-        limite: z.number().min(1).max(200).optional().describe("Default: 200"),
-      },
+  // ── buscar_admitidos ──────────────────────────────────────
+  server.registerTool("buscar_admitidos", {
+    title: "Buscar admitidos y cápitas de Grado",
+    description: "Consulta directamente en hed__Application__c los postulantes admitidos con su valor de cápita. No depende de la sesión de leads en RAM.",
+    inputSchema: {
+      ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
+      limite: z.number().min(1).max(200).optional().describe("Default: 200"),
     },
-    async (args) => {
-      try {
-        const res = await buscarAdmitidos({
-          ano: args.ano,
-          limite: args.limite,
-        });
+  }, async (args) => {
+    try {
+      const res = await buscarAdmitidos({
+        ano: args.ano,
+        limite: args.limite,
+      });
 
-        if (res.totalAdmitidos === 0) {
-          return texto({
-            alerta: "POSIBLE_DESFASAJE_DE_DATOS",
-            mensaje: `La consulta devolvió 0 admitidos en hed__Application__c para el año ${args.ano || 'seleccionado'}. Verifique filtros o tagging.`,
-            totalAdmitidos: 0,
-            totalCapitas: 0,
-          });
-        }
-
+      if (res.totalAdmitidos === 0) {
         return texto({
-          totalAdmitidos: res.totalAdmitidos,
-          totalCapitas: res.totalCapitas,
-          admitidos: res.registros,
-        });
-      } catch (err) {
-        console.error("Error al consultar admitidos:", err.message);
-        return texto({
-          error: "ERROR_CONSULTA_SALESFORCE",
-          detalle: err.message,
+          alerta: "POSIBLE_DESFASAJE_DE_DATOS",
+          mensaje: `La consulta devolvió 0 admitidos en hed__Application__c para el año ${args.ano || 'seleccionado'}. Verifique filtros o tagging.`,
+          totalAdmitidos: 0,
+          totalCapitas: 0,
         });
       }
+
+      return texto({
+        totalAdmitidos: res.totalAdmitidos,
+        totalCapitas: res.totalCapitas,
+        admitidos: res.registros,
+      });
+    } catch (err) {
+      console.error("Error al consultar admitidos:", err.message);
+      return texto({
+        error: "ERROR_CONSULTA_SALESFORCE",
+        detalle: err.message,
+      });
     }
-  );
-  
+  });
+
   // ── comparar_cohortes ─────────────────────────────────────
   server.registerTool("comparar_cohortes", {
     title: "Comparar dos cohortes",
-    description: "Compara dos cohortes lado a lado, opcionalmente recortando ambas al mismo mes de campaña para que la comparación sea justa. Devuelve variaciones porcentuales.",
+    description: "Compara dos cohortes lado a lado.",
     inputSchema: {
-      cohorte_a: z.string().describe("Cohorte base, ej. 2026S1"),
-      cohorte_b: z.string().describe("Cohorte a comparar, ej. 2027S1"),
-      hasta_mes_campana: z.number().min(1).max(36).optional()
-        .describe("Recorta ambas cohortes a sus primeros N meses de campaña. Muy recomendado: sin esto se compara un ciclo terminado contra uno en curso."),
+      cohorte_a: z.string(),
+      cohorte_b: z.string(),
+      hasta_mes_campana: z.number().min(1).max(36).optional(),
       asesor: z.string().optional(),
       origen: z.string().optional(),
     },
@@ -305,9 +267,7 @@ function crearServidorMcp() {
     if (!sesion) return sinSesion();
 
     const recortar = (cohorte) => {
-      let ls = filtrar(sesion.leads, {
-        cohorte, asesor: args.asesor, origen: args.origen,
-      });
+      let ls = filtrar(sesion.leads, { cohorte, asesor: args.asesor, origen: args.origen });
       if (!ls.length) return { ls: [], meses: [] };
 
       const meses = [...new Set(ls.map(l => l.mes).filter(Boolean))].sort();
@@ -322,10 +282,7 @@ function crearServidorMcp() {
     const B = recortar(canonSemestre(args.cohorte_b));
 
     if (!A.ls.length || !B.ls.length) {
-      return texto({
-        error: "Una de las cohortes no tiene datos.",
-        cohortesDisponibles: Object.keys(sesion.porCohorte).sort(),
-      });
+      return texto({ error: "Una de las cohortes no tiene datos." });
     }
 
     const eA = contarEmbudo(A.ls);
@@ -341,28 +298,20 @@ function crearServidorMcp() {
     return texto({
       cohorteA: canonSemestre(args.cohorte_a),
       cohorteB: canonSemestre(args.cohorte_b),
-      recorte: args.hasta_mes_campana
-        ? `Ambas cohortes recortadas a sus primeros ${args.hasta_mes_campana} meses de campaña.`
-        : "SIN RECORTE — se compara un ciclo posiblemente completo contra uno en curso. Los números no son comparables directamente.",
-      mesesDisponibles: { a: A.meses.length, b: B.meses.length },
       embudoA: { ...eA, tasas: tasas(eA) },
       embudoB: { ...eB, tasas: tasas(eB) },
       variacion,
-      advertencias: [
-        "Si el equipo de asesores cambió entre ciclos y la sesión se cargó con el filtro de owners actual, la cohorte vieja está subcontada.",
-        "Los admitidos de la cohorte en curso van a seguir subiendo: no es un total final.",
-      ],
     });
   });
 
   // ── buscar_leads ──────────────────────────────────────────
   server.registerTool("buscar_leads", {
     title: "Buscar leads",
-    description: "Devuelve hasta 50 leads individuales filtrados. Usar para casos concretos, no para panoramas — para volúmenes usar 'embudo'.",
+    description: "Devuelve hasta 50 leads individuales filtrados.",
     inputSchema: {
       ...filtrosBase,
-      orden: z.enum(["reciente", "antiguo"]).optional().describe("Default: reciente"),
-      limite: z.number().min(1).max(50).optional().describe("Tope 50. Default 20."),
+      orden: z.enum(["reciente", "antiguo"]).optional(),
+      limite: z.number().min(1).max(50).optional(),
     },
   }, async (args) => {
     if (!sesion) return sinSesion();
@@ -381,7 +330,6 @@ function crearServidorMcp() {
       mostrando: Math.min(total, limite),
       embudoDelFiltro: contarEmbudo(res),
       leads: res.slice(0, limite),
-      ...(total > limite && { aviso: `Hay ${total} coincidencias. Afiná los filtros.` }),
     });
   });
 
@@ -419,7 +367,4 @@ app.get("/mcp", auth, (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`LeadFunnel MCP v3 escuchando en :${PORT}`);
-  if (!process.env.MCP_TOKEN) {
-    console.warn("⚠️  MCP_TOKEN no definido — todo va a devolver 404.");
-  }
 });
