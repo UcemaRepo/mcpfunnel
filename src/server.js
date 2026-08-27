@@ -1290,111 +1290,91 @@ function terminoInfoSeguro(
 }
 
 app.get(
-  "/debug/duplicados-dni",
-  (req, res) => {
+  "/debug/apps-2027",
+  async (req, res) => {
     try {
-      const data = getSesion();
+      const creds = await autenticar();
+      const sf = crearCliente(creds);
 
-      const terminoBuscado =
-        normalizarTermino(
-          req.query.termino || "2027S1"
-        );
+      const apps = await sf.queryAll(`
+        SELECT
+          Id,
+          Name,
+          hed__Applicant__c,
+          hed__Applicant__r.Name,
+          hed__Applicant__r.Numero_de_documento__c,
+          hed__Application_Status__c,
+          AnoLectivo__c,
+          Capita__c,
+          hed__Term__r.Name,
+          hed__Applying_To__c,
+          hed__Applying_To__r.Name,
+          OwnerId,
+          Owner.Name,
+          CreatedDate
 
-      const apps =
-        (data.admitidosSalesforce || [])
-          .filter((app) =>
-            terminosCompatibles(
-              terminoBuscado,
-              app.termino
-            )
-          );
+        FROM hed__Application__c
 
-      const mapa = new Map();
+        WHERE
+          (
+            hed__Application_Status__c LIKE '%Admi%'
+            OR
+            hed__Application_Status__c LIKE '%Admit%'
+          )
 
-      for (const app of apps) {
-        if (!app.dni) continue;
+          AND
+          (
+            AnoLectivo__c = 2027
+            OR
+            hed__Term__r.Name LIKE '2027%'
+          )
 
-        if (!mapa.has(app.dni)) {
-          mapa.set(app.dni, []);
-        }
+        ORDER BY CreatedDate DESC
+      `);
 
-        mapa.get(app.dni).push(app);
-      }
+      return res.json({
+        ok: true,
+        totalApplications: apps.length,
 
-      const duplicados = [];
+        applications: apps.map(
+          (a) => ({
+            idApplication: a.Id,
+            numeroSolicitud: a.Name,
 
-      for (const [dni, registros] of mapa) {
-        if (registros.length > 1) {
-          duplicados.push({
-            dni,
-            cantidad: registros.length,
+            idContacto:
+              a.hed__Applicant__c,
 
-            capitas: +registros
-              .reduce(
-                (sum, a) =>
-                  sum +
-                  (Number(a.capita) || 0),
-                0
-              )
-              .toFixed(2),
+            nombre:
+              a.hed__Applicant__r?.Name,
 
-            personas: registros.map(
-              (a) => ({
-                idApplication:
-                  a.idApplication,
+            dni:
+              a.hed__Applicant__r
+                ?.Numero_de_documento__c,
 
-                idContacto:
-                  a.idContacto,
+            termino:
+              a.hed__Term__r?.Name,
 
-                nombre:
-                  a.nombreAlumno,
+            anoLectivo:
+              a.AnoLectivo__c,
 
-                termino:
-                  a.termino,
+            capita:
+              Number(a.Capita__c ?? 0),
 
-                terminoOriginal:
-                  a.terminoOriginal,
+            carrera:
+              a.hed__Applying_To__r?.Name ||
+              null,
 
-                capita:
-                  a.capita,
-              })
-            ),
-          });
-        }
-      }
+            asesor:
+              a.Owner?.Name ||
+              null,
 
-      const capitasTotal =
-        apps.reduce(
-          (sum, a) =>
-            sum +
-            (Number(a.capita) || 0),
-          0
-        );
+            ownerId:
+              a.OwnerId,
 
-      return ok(res, {
-        filtro:
-          terminoBuscado,
-
-        totalAdmitidos:
-          apps.length,
-
-        totalCapitas:
-          +capitasTotal.toFixed(2),
-
-        dnisUnicos:
-          mapa.size,
-
-        cantidadDnisDuplicados:
-          duplicados.length,
-
-        registrosDuplicados:
-          duplicados.reduce(
-            (sum, d) =>
-              sum + d.cantidad,
-            0
-          ),
-
-        duplicados,
+            createdDate:
+              a.CreatedDate,
+          })
+        ),
       });
 
     } catch (error) {
