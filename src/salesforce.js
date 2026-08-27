@@ -53,7 +53,7 @@ function crearCliente({ token, inst }) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
     if (data.errorCode || data[0]?.errorCode) {
-      throw new Error(`SOQL: ${JSON.stringify(data)}`);
+      throw new Error(`SOQL Error: ${JSON.stringify(data)}`);
     }
     return data;
   };
@@ -253,73 +253,66 @@ export async function cargarLeads(opts = {}) {
 
 // ── Consulta directa al objeto de Solicitudes (hed__Application__c) delimitada a Grado ──────
 export async function buscarAdmitidos(opts = {}) {
-  try {
-    const creds = await autenticar();
-    const sf = crearCliente(creds);
+  const creds = await autenticar();
+  const sf = crearCliente(creds);
 
-    const ownerIn = ASESOR_IDS.map(i => `'${i}'`).join(",");
+  let whereClauses = [
+    "(hed__Application_Status__c LIKE '%Admi%' OR hed__Application_Status__c LIKE '%Admit%')"
+  ];
 
-    let whereClauses = [
-      "(hed__Application_Status__c = 'Admit' OR hed__Application_Status__c = 'Admision')",
-      `OwnerId IN (${ownerIn})`, // Delimitación por los 6 asesores de Grado
-      "NOT hed__Term__r.Name LIKE '%Posgrado%'",
-      "NOT hed__Term__r.Name LIKE '%Maestría%'",
-      "NOT hed__Term__r.Name LIKE '%Executive%'"
-    ];
-
-    if (opts.ano) {
-      whereClauses.push(`AnoLectivo__c = ${Number(opts.ano)}`);
-    }
-
-    if (opts.nombre) {
-      const nombreLimpio = opts.nombre.replace(/'/g, "\\'");
-      whereClauses.push(`hed__Applicant__r.Name LIKE '%${nombreLimpio}%'`);
-    }
-
-    const limite = Math.min(opts.limite || 200, 500);
-
-    const query = `SELECT 
-        Id, 
-        Name, 
-        hed__Applicant__c, 
-        hed__Applicant__r.Name, 
-        hed__Application_Status__c, 
-        hed__Application_Date__c, 
-        AnoLectivo__c, 
-        Capita__c,
-        hed__Term__r.Name,
-        OwnerId
-      FROM hed__Application__c 
-      WHERE ${whereClauses.join(" AND ")}
-      ORDER BY CreatedDate DESC
-      LIMIT ${limite}`;
-
-    const records = await sf.queryAll(query);
-
-    const admitidos = records.map(r => ({
-      idApplication: r.Id,
-      numeroSolicitud: r.Name,
-      idContacto: r.hed__Applicant__c,
-      nombreAlumno: r.hed__Applicant__r ? r.hed__Applicant__r.Name : "Sin Nombre",
-      estado: r.hed__Application_Status__c,
-      fechaSolicitud: r.hed__Application_Date__c,
-      anoLectivo: r.AnoLectivo__c,
-      capita: r.Capita__c ?? 0,
-      termino: r.hed__Term__r ? r.hed__Term__r.Name : null
-    }));
-
-    const totalCapitas = admitidos.reduce((acc, r) => acc + (r.capita || 0), 0);
-
-    return {
-      filtroAplicado: "Solo Grado (Asesores delimitados)",
-      totalAdmitidos: admitidos.length,
-      totalCapitas: +totalCapitas.toFixed(2),
-      registros: admitidos
-    };
-  } catch (error) {
-    return {
-      error: "ERROR_CONSULTA_SALESFORCE",
-      detalle: error.message
-    };
+  // Filtro por año lectivo o cohorte (soporta match en año o en término)
+  if (opts.ano) {
+    const anoStr = String(opts.ano);
+    whereClauses.push(`(AnoLectivo__c = ${Number(opts.ano)} OR hed__Term__r.Name LIKE '%${anoStr}%')`);
   }
+
+  if (opts.nombre) {
+    const nombreLimpio = opts.nombre.replace(/'/g, "\\'");
+    whereClauses.push(`hed__Applicant__r.Name LIKE '%${nombreLimpio}%'`);
+  }
+
+  // Excluir posgrados del término
+  whereClauses.push("NOT hed__Term__r.Name LIKE '%Posgrado%'");
+  whereClauses.push("NOT hed__Term__r.Name LIKE '%Maestría%'");
+  whereClauses.push("NOT hed__Term__r.Name LIKE '%Executive%'");
+
+  const limite = Math.min(opts.limite || 200, 500);
+
+  const query = `SELECT 
+      Id, 
+      Name, 
+      hed__Applicant__c, 
+      hed__Applicant__r.Name, 
+      hed__Application_Status__c, 
+      hed__Application_Date__c, 
+      AnoLectivo__c, 
+      Capita__c,
+      hed__Term__r.Name,
+      OwnerId
+    FROM hed__Application__c 
+    WHERE ${whereClauses.join(" AND ")}
+    ORDER BY CreatedDate DESC
+    LIMIT ${limite}`;
+
+  const records = await sf.queryAll(query);
+
+  const admitidos = records.map(r => ({
+    idApplication: r.Id,
+    numeroSolicitud: r.Name,
+    idContacto: r.hed__Applicant__c,
+    nombreAlumno: r.hed__Applicant__r ? r.hed__Applicant__r.Name : "Sin Nombre",
+    estado: r.hed__Application_Status__c,
+    fechaSolicitud: r.hed__Application_Date__c,
+    anoLectivo: r.AnoLectivo__c ?? null,
+    capita: r.Capita__c ?? 0,
+    termino: r.hed__Term__r ? r.hed__Term__r.Name : null
+  }));
+
+  const totalCapitas = admitidos.reduce((acc, r) => acc + (Number(r.capita) || 0), 0);
+
+  return {
+    totalAdmitidos: admitidos.length,
+    totalCapitas: +totalCapitas.toFixed(2),
+    registros: admitidos
+  };
 }
