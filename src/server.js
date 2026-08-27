@@ -6,7 +6,7 @@ import express from "express";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { cargarLeads, buscarAdmitidos } from "./salesforce.js";
+import { cargarLeads, buscarAdmitidos, resumirAdmitidosCapitas } from "./salesforce.js";
 import {
   contarEmbudo, tasas, agregarPor, coincideEstado, normalizar, canonSemestre,
 } from "./transform.js";
@@ -343,8 +343,25 @@ function crearServidorMcp() {
     });
   });
 
+server.registerTool("resumir_admitidos_capitas", {
+    title: "Resumen totalizado de admitidos y cápitas de Grado",
+    description: "Realiza una agregación por GROUP BY directamente en Salesforce. Devuelve totales de admitidos y suma de cápitas por término sin limite de paginación.",
+    inputSchema: {
+      ano: z.number().optional().describe("Año lectivo a resumir (ej: 2027)"),
+    },
+  }, async (args) => {
+    try {
+      const res = await resumirAdmitidosCapitas(args);
+      return texto(res);
+    } catch (err) {
+      console.error("Error al resumir admitidos:", err.message);
+      return texto({ error: "ERROR_RESUMEN_SALESFORCE", detalle: err.message });
+    }
+  });
+  
   return server;
 }
+
 
 // ── Transporte MCP stateless ────────────────────────────────
 app.post("/mcp", auth, async (req, res) => {
