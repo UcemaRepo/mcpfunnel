@@ -362,7 +362,7 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── NUEVA FUNCIÓN: Agregación masiva mediante GROUP BY directa en Salesforce ──────
-// ── Agregación por GROUP BY directa (Criterio Académico Estricto por Término) ──
+// ── Agregación por GROUP BY directa (Criterio Académico Flexible por Término) ──
 export async function resumirAdmitidosCapitas(opts = {}) {
   const creds = await autenticar();
   const sf = crearCliente(creds);
@@ -375,13 +375,12 @@ export async function resumirAdmitidosCapitas(opts = {}) {
     "(NOT hed__Term__r.Name LIKE '%Septiembre%')"
   ];
 
-  // Si se pasa un año (ej. 2027), filtramos por los términos exactos de ese ciclo
   if (opts.ano) {
     const anoStr = String(opts.ano);
-    whereClauses.push(`(hed__Term__r.Name LIKE '${anoStr}SEM%' OR hed__Term__r.Name LIKE '${anoStr} SEM%')`);
+    // Matchea '2027SEM1', '2027 SEM 1', '2027-SEM1', etc., o AnoLectivo__c si el término no es nulo
+    whereClauses.push(`(hed__Term__r.Name LIKE '%${anoStr}%SEM%' OR hed__Term__r.Name LIKE '%${anoStr} SEM%')`);
   }
 
-  // Si se pasa un término/semestre específico (ej. "2027SEM 1")
   if (opts.termino) {
     const termLimpio = opts.termino.replace(/'/g, "\\'");
     whereClauses.push(`hed__Term__r.Name LIKE '%${termLimpio}%'`);
