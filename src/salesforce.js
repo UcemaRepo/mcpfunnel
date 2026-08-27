@@ -18,9 +18,6 @@ const ASESOR_IDS = [
   "005VJ000000taFmYAI",
 ];
 
-// Cohortes a traer. Incluye 2026SEM1 para poder comparar contra
-// el ciclo anterior. Las variantes cubren el tipeo inconsistente
-// del picklist en Salesforce.
 const SEMESTRES = [
   "2026SEM 1", "2026SEM1", "2026 SEM 1",
   "2026SEM 2", "2026SEM2", "2026 SEM 2",
@@ -75,8 +72,6 @@ function crearCliente({ token, inst }) {
     return out;
   };
 
-  // quote:false para campos NUMÉRICOS como Numero_de_documento__c.
-  // Salesforce rechaza un IN con comillas sobre un campo double.
   const queryBatched = async (ids, soqlFn, opts = {}) => {
     const { concurrencia = 5, quote = true } = opts;
     const lotes = [];
@@ -108,9 +103,6 @@ export async function cargarLeads(opts = {}) {
   const semestreIn = SEMESTRES.map(s => `'${s}'`).join(",");
   const desde      = opts.desde || "2025-01-01T00:00:00Z";
 
-  // Para comparar cohortes históricas conviene NO filtrar por
-  // owner: los leads de asesores que ya no están quedarían fuera
-  // y subestimarían el ciclo anterior.
   const filtroOwner = opts.todosLosAsesores ? "" : `AND OwnerId IN (${ownerIn})`;
 
   const records = await sf.queryAll(`SELECT Id, Nombres__c, Apellidos__c,
@@ -129,7 +121,6 @@ export async function cargarLeads(opts = {}) {
 
   const candidatoIds = [...new Set(records.map(r => r.Candidato__c).filter(Boolean))];
 
-  // Lead y CampaignMember en paralelo
   const [leadRecs, cmRecs] = await Promise.all([
     sf.queryBatched(candidatoIds, ids =>
       `SELECT Id, Status FROM Lead WHERE Id IN (${ids})`),
@@ -155,7 +146,6 @@ export async function cargarLeads(opts = {}) {
     }
   });
 
-  // Contact por DNI (numérico, sin comillas)
   const limpiarDni = (d) => (d || "").toString().replace(/[.\s-]/g, "");
   const dnis = [...new Set(
     records.map(r => limpiarDni(r.N_mero_de_documento__c))
@@ -177,7 +167,6 @@ export async function cargarLeads(opts = {}) {
     dniByContact[c.Id] = dni;
   });
 
-  // Feedback de admitidos y convertidos
   const contactIdsSet = new Set();
   for (const r of records) {
     const c = contactByDni[limpiarDni(r.N_mero_de_documento__c)];
@@ -233,7 +222,6 @@ export async function cargarLeads(opts = {}) {
       estado,
       campanas: camps,
       nota: notaByDni[dni] ?? null,
-      // El dato que antes se consultaba y se descartaba
       admitido: contactByDni[dni]?.admitido === true,
     }, { enmascarar });
   });
@@ -251,8 +239,6 @@ export async function cargarLeads(opts = {}) {
     tasasGlobales: tasas(embudoGlobal),
     porCohorte: agregarPorCohorte(leads),
 
-    // Si el cruce por DNI es pobre, el conteo de admitidos no es
-    // confiable — mejor saberlo que asumir que el número es real.
     diagnostico: {
       totalRegistros: records.length,
       conDniValido: dnis.length,
@@ -264,7 +250,8 @@ export async function cargarLeads(opts = {}) {
     campanasDescartadas: Array.from(campanasDescartadas).sort(),
   };
 }
-// salesforce.js — Consulta directa al objeto de Solicitudes (hed__Application__c)
+
+// ── Consulta directa al objeto de Solicitudes (hed__Application__c) ──────
 export async function buscarAdmitidos(opts = {}) {
   const creds = await autenticar();
   const sf = crearCliente(creds);
