@@ -224,6 +224,7 @@ function crearServidorMcp() {
       ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
       nombre: z.string().optional().describe("Nombre o apellido del postulante/alumno para filtrar en Salesforce"),
       limite: z.number().min(1).max(200).optional().describe("Default: 200"),
+      offset: z.number().min(0).optional().describe("Punto de inicio para paginación (default: 0)"),
     },
   }, async (args) => {
     try {
@@ -231,6 +232,7 @@ function crearServidorMcp() {
         ano: args.ano,
         nombre: args.nombre,
         limite: args.limite,
+        offset: args.offset,
       });
 
       if (res.totalAdmitidos === 0) {
@@ -239,12 +241,16 @@ function crearServidorMcp() {
           mensaje: `La consulta devolvió 0 admitidos en hed__Application__c para el filtro aplicado. Verifique filtros o tagging.`,
           totalAdmitidos: 0,
           totalCapitas: 0,
+          offset: res.offset,
+          limite: res.limite,
         });
       }
 
       return texto({
         totalAdmitidos: res.totalAdmitidos,
         totalCapitas: res.totalCapitas,
+        offset: res.offset,
+        limite: res.limite,
         admitidos: res.registros,
       });
     } catch (err) {
