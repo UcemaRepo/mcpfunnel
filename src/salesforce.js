@@ -167,7 +167,6 @@ export async function cargarLeads(opts = {}) {
     dniByContact[c.Id] = dni;
   });
 
-  // ── NUEVO: Consulta masiva a hed__Application__c para mapear admitidos reales ──
   const admitidosSetByDni = new Set();
   const admitidosSetByContactId = new Set();
 
@@ -176,7 +175,8 @@ export async function cargarLeads(opts = {}) {
     WHERE (hed__Application_Status__c LIKE '%Admi%' OR hed__Application_Status__c LIKE '%Admit%')
     AND (NOT hed__Term__r.Name LIKE '%Posgrado%')
     AND (NOT hed__Term__r.Name LIKE '%Maestría%')
-    AND (NOT hed__Term__r.Name LIKE '%Executive%')`);
+    AND (NOT hed__Term__r.Name LIKE '%Executive%')
+    AND (NOT hed__Term__r.Name LIKE '%Septiembre%')`);
 
   appsAdmitidas.forEach(app => {
     if (app.hed__Applicant__c) {
@@ -196,7 +196,6 @@ export async function cargarLeads(opts = {}) {
     const conv = estadoPri(cmMap[r.Candidato__c]?.best || "") === 7
       || (r.Estado_del_Candidato2__c || "").toLowerCase() === "qualified";
     
-    // Si la solicitud está admitida, la consideramos en la lista de contactos
     const esAdmitidoReal = c.admitido || admitidosSetByDni.has(dni) || admitidosSetByContactId.has(c.id);
     if (esAdmitidoReal || conv) contactIdsSet.add(c.id);
   }
@@ -243,7 +242,6 @@ export async function cargarLeads(opts = {}) {
     const dni = limpiarDni(r.N_mero_de_documento__c);
     const contactInfo = contactByDni[dni];
 
-    // Se evalúa como admitido si figura en Contact.Admitido__c O si tiene solicitud aprobada en hed__Application__c
     const esAdmitido = (contactInfo?.admitido === true) 
       || admitidosSetByDni.has(dni) 
       || (contactInfo?.id && admitidosSetByContactId.has(contactInfo.id));
@@ -282,7 +280,7 @@ export async function cargarLeads(opts = {}) {
   };
 }
 
-// ── Consulta directa al objeto de Solicitudes (hed__Application__c) delimitada a Grado ──────
+// ── Consulta estructurada a hed__Application__c con filtros rigurosos de Grado ──────
 export async function buscarAdmitidos(opts = {}) {
   const creds = await autenticar();
   const sf = crearCliente(creds);
@@ -291,9 +289,11 @@ export async function buscarAdmitidos(opts = {}) {
     "(hed__Application_Status__c LIKE '%Admi%' OR hed__Application_Status__c LIKE '%Admit%')"
   ];
 
+  // FILTRO CORREGIDO: Pegado estricto al número de año lectivo o semestres de grado válidos
   if (opts.ano) {
+    const anoNum = Number(opts.ano);
     const anoStr = String(opts.ano);
-    whereClauses.push(`(AnoLectivo__c = ${Number(opts.ano)} OR hed__Term__r.Name LIKE '%${anoStr}%')`);
+    whereClauses.push(`(AnoLectivo__c = ${anoNum} OR hed__Term__r.Name LIKE '${anoStr}SEM%' OR hed__Term__r.Name LIKE '${anoStr} SEM%')`);
   }
 
   if (opts.nombre) {
@@ -301,9 +301,19 @@ export async function buscarAdmitidos(opts = {}) {
     whereClauses.push(`hed__Applicant__r.Name LIKE '%${nombreLimpio}%'`);
   }
 
+  // Filtros de Cápita corregidos
+  if (opts.capita_min !== undefined && opts.capita_min !== null) {
+    whereClauses.push(`Capita__c >= ${Number(opts.capita_min)}`);
+  }
+  if (opts.capita_max !== undefined && opts.capita_max !== null) {
+    whereClauses.push(`Capita__c <= ${Number(opts.capita_max)}`);
+  }
+
+  // Exclusión estricta de programas que no son de Grado
   whereClauses.push("(NOT hed__Term__r.Name LIKE '%Posgrado%')");
   whereClauses.push("(NOT hed__Term__r.Name LIKE '%Maestría%')");
   whereClauses.push("(NOT hed__Term__r.Name LIKE '%Executive%')");
+  whereClauses.push("(NOT hed__Term__r.Name LIKE '%Septiembre%')");
 
   const limite = Math.min(opts.limite || 200, 500);
   const offset = Math.max(opts.offset || 0, 0);
@@ -348,5 +358,52 @@ export async function buscarAdmitidos(opts = {}) {
     offset,
     limite,
     registros: admitidos
+  };
+}
+
+// ── NUEVA FUNCIÓN: Agregación masiva mediante GROUP BY directa en Salesforce ──────
+export async function resumirAdmitidosCapitas(opts = {}) {
+  const creds = await autenticar();
+  const sf = crearCliente(creds);
+
+  let whereClauses = [
+    "(hed__Application_Status__c LIKE '%Admi%' OR hed__Application_Status__c LIKE '%Admit%')",
+    "(NOT hed__Term__r.Name LIKE '%Posgrado%')",
+    "(NOT hed__Term__r.Name LIKE '%Maestría%')",
+    "(NOT hed__Term__r.Name LIKE '%Executive%')",
+    "(NOT hed__Term__r.Name LIKE '%Septiembre%')"
+  ];
+
+  if (opts.ano) {
+    const anoNum = Number(opts.ano);
+    const anoStr = String(opts.ano);
+    whereClauses.push(`(AnoLectivo__c = ${anoNum} OR hed__Term__r.Name LIKE '${anoStr}SEM%' OR hed__Term__r.Name LIKE '${anoStr} SEM%')`);
+  }
+
+  const query = `SELECT 
+      hed__Term__r.Name termino, 
+      COUNT(Id) totalAdmitidos, 
+      SUM(Capita__c) totalCapitas
+    FROM hed__Application__c 
+    WHERE ${whereClauses.join(" AND ")}
+    GROUP BY hed__Term__r.Name`;
+
+  const data = await sf.query(query);
+  const records = data.records || [];
+
+  const desglose = records.map(r => ({
+    termino: r.termino || "Sin Término Asignado",
+    totalAdmitidos: r.totalAdmitidos || 0,
+    totalCapitas: +(r.totalCapitas || 0).toFixed(2)
+  }));
+
+  const granTotalAdmitidos = desglose.reduce((a, b) => a + b.totalAdmitidos, 0);
+  const granTotalCapitas = desglose.reduce((a, b) => a + b.totalCapitas, 0);
+
+  return {
+    anoConsultado: opts.ano || "Todos",
+    totalAdmitidos: granTotalAdmitidos,
+    totalCapitas: +granTotalCapitas.toFixed(2),
+    desglosePorTermino: desglose
   };
 }
