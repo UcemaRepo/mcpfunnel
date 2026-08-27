@@ -374,37 +374,42 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── Agregación basada en la Sesión Activa del Funnel ─────────────────────────
+// salesforce.js
 export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   if (!sesionActiva || !sesionActiva.leads) {
     throw new Error("No hay una sesión activa del funnel cargada en memoria.");
   }
 
-  const terminoBuscado = opts.termino ? canonSemestre(opts.termino) : null;
-  const anoBuscado = opts.ano ? String(opts.ano) : null;
+  // Capturar término/año desde los args
+  const termInput = opts.termino || opts.term || null;
+  const anoInput = opts.ano || opts.year || null;
 
-  // 1. Filtrar leads por la cohorte comercial o año lectivo
+  const terminoBuscado = termInput ? canonSemestre(termInput) : null;
+  const anoBuscado = anoInput ? String(anoInput).trim() : null;
+
+  // 1. Filtrar leads
   let leadsFiltrados = sesionActiva.leads;
 
   if (terminoBuscado) {
-    leadsFiltrados = leadsFiltrados.filter(l => 
-      l.cohorte === terminoBuscado || 
-      canonSemestre(l.cohorte) === terminoBuscado
-    );
+    leadsFiltrados = leadsFiltrados.filter(l => {
+      const coh = l.cohorte || l.cuandoIngresaria || l.termino || "";
+      return coh === terminoBuscado || canonSemestre(coh) === terminoBuscado;
+    });
   } else if (anoBuscado) {
-    leadsFiltrados = leadsFiltrados.filter(l => 
-      l.cohorte && String(l.cohorte).startsWith(anoBuscado)
-    );
+    leadsFiltrados = leadsFiltrados.filter(l => {
+      const coh = l.cohorte || l.cuandoIngresaria || l.termino || "";
+      return String(coh).includes(anoBuscado);
+    });
   }
 
-  // 2. Filtrar únicamente los admitidos reales
+  // 2. Solo Admitidos reales
   const admitidos = leadsFiltrados.filter(l => l.admitido === true);
 
-  // 3. Desduplicar por Candidato / DNI / ID Único
+  // 3. Desduplicar por Alumno / Contacto
   const admitidosUnicosMap = new Map();
 
   for (const lead of admitidos) {
-    // Garantizamos una clave de desduplicación única y robusta por persona
-    const clavePersona = lead.dni || lead.idCandidato || lead.id || `${lead.nombre}_${lead.createdDate}`;
+    const clavePersona = lead.dni || lead.idContacto || lead.idCandidato || lead.id || `${lead.nombre}_${lead.createdDate}`;
 
     if (!admitidosUnicosMap.has(clavePersona)) {
       admitidosUnicosMap.set(clavePersona, lead);
@@ -413,10 +418,12 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
 
   const admitidosUnicos = Array.from(admitidosUnicosMap.values());
 
-  // 4. Agrupar por cohorte/término
+  // 4. Agrupar por cohorte exacta
   const porCohorte = {};
   for (const a of admitidosUnicos) {
-    const coh = a.cohorte || "Sin Cohorte";
+    const cohRaw = a.cohorte || a.cuandoIngresaria || a.termino || "Sin Cohorte";
+    const coh = canonSemestre(cohRaw) || cohRaw;
+
     if (!porCohorte[coh]) {
       porCohorte[coh] = { totalAdmitidos: 0, totalCapitas: 0 };
     }
