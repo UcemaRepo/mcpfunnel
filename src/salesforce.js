@@ -371,48 +371,56 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── Agregación basada en la Sesión Activa del Funnel (Opción 1) ──────────────
-// ── Agregación Precisa de Admitidos y Cápitas por Candidato Único ────────────
+// ── Agregación por Doble Validación (Lead + Admisión + Normalización) ───────
 export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   if (!sesionActiva || !sesionActiva.leads) {
     throw new Error("No hay una sesión activa del funnel cargada en memoria.");
   }
 
-  let leads = sesionActiva.leads;
-
-  // 1. Filtrar por término exacto (ej: "2027S1") o año (ej: 2027)
+  // 1. Normalizar el filtro de cohorte (ej: "2027S1", "2027SEM1", "2027" -> "2027S1")
+  let cohorteFiltro = null;
   if (opts.termino) {
-    const termBuscado = String(opts.termino).trim();
-    leads = leads.filter(l => l.cohorte === termBuscado);
+    cohorteFiltro = canonSemestre(opts.termino);
   } else if (opts.ano) {
-    const anoStr = String(opts.ano);
-    leads = leads.filter(l => l.cohorte && l.cohorte.startsWith(anoStr));
+    cohorteFiltro = canonSemestre(String(opts.ano));
   }
 
-  // 2. Solo tomamos los admitidos
-  const admitidos = leads.filter(l => l.admitido === true);
+  // 2. Filtrar el universo de leads activos por la cohorte normalizada
+  let leadsUniverso = sesionActiva.leads;
+  if (cohorteFiltro) {
+    leadsUniverso = leadsUniverso.filter(l => 
+      l.cohorte === cohorteFiltro || 
+      (l.cohorte && l.cohorte.includes(String(opts.ano || opts.termino)))
+    );
+  }
 
-  // 3. Desduplicar por DNI / Candidato para no contar el mismo alumno múltiples veces
-  const admitidosUnicosMap = new Map();
+  // 3. Doble Validación: Candidato único admitido dentro de la cohorte/fecha
+  const admitidosValidadosMap = new Map();
 
-  for (const l of admitidos) {
-    // Clave única por DNI o ID de candidato
-    const claveUnica = l.dni || l.idCandidato || l.id;
-    if (!admitidosUnicosMap.has(claveUnica)) {
-      admitidosUnicosMap.set(claveUnica, l);
+  for (const lead of leadsUniverso) {
+    // Debe estar marcado como admitido en la cross-query de Salesforce
+    if (!lead.admitido) continue;
+
+    // Clave única para evitar duplicación de formularios del mismo alumno
+    const idUnico = lead.dni || lead.idCandidato || lead.id;
+
+    if (!admitidosValidadosMap.has(idUnico)) {
+      admitidosValidadosMap.set(idUnico, {
+        cohorte: lead.cohorte || cohorteFiltro || "Sin Cohorte",
+        capita: typeof lead.capita === "number" && lead.capita > 0 ? lead.capita : 1.0
+      });
     }
   }
 
-  const admitidosUnicos = Array.from(admitidosUnicosMap.values());
-
-  // 4. Agrupar por cohorte exacta
+  // 4. Agrupar y ponderar por cohorte validada
   const porCohorte = {};
-  for (const a of admitidosUnicos) {
-    const coh = a.cohorte || "Sin Cohorte";
+  for (const item of admitidosValidadosMap.values()) {
+    const coh = item.cohorte;
     if (!porCohorte[coh]) {
       porCohorte[coh] = { totalAdmitidos: 0, totalCapitas: 0 };
     }
     porCohorte[coh].totalAdmitidos += 1;
-    porCohorte[coh].totalCapitas += (Number(a.capita) || 1);
+    porCohorte[coh].totalCapitas += item.capita;
   }
 
   const desglose = Object.keys(porCohorte).sort().map(c => ({
@@ -425,7 +433,7 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   const totalCapitas = desglose.reduce((a, b) => a + b.totalCapitas, 0);
 
   return {
-    filtroAplicado: opts.termino ? `Término ${opts.termino}` : opts.ano ? `Año ${opts.ano}` : "Todos",
+    filtroAplicado: cohorteFiltro ? `Cohorte ${cohorteFiltro}` : opts.ano ? `Año ${opts.ano}` : "Todos",
     totalAdmitidos,
     totalCapitas: +totalCapitas.toFixed(2),
     desglosePorTermino: desglose
