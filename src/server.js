@@ -12,6 +12,7 @@ import {
   buscarAdmitidos,
   resumirAdmitidosCapitas,
   normalizarTermino,
+  terminosCompatibles,
 } from "./salesforce.js";
 
 import {
