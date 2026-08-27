@@ -362,7 +362,7 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── NUEVA FUNCIÓN: Agregación masiva mediante GROUP BY directa en Salesforce ──────
-// ── Agregación por GROUP BY directa (Criterio Académico Flexible por Término) ──
+// ── Agregación por GROUP BY directa (Académico Completo) ────────────────────
 export async function resumirAdmitidosCapitas(opts = {}) {
   const creds = await autenticar();
   const sf = crearCliente(creds);
@@ -376,9 +376,10 @@ export async function resumirAdmitidosCapitas(opts = {}) {
   ];
 
   if (opts.ano) {
+    const anoNum = Number(opts.ano);
     const anoStr = String(opts.ano);
-    // Matchea '2027SEM1', '2027 SEM 1', '2027-SEM1', etc., o AnoLectivo__c si el término no es nulo
-    whereClauses.push(`(hed__Term__r.Name LIKE '%${anoStr}%SEM%' OR hed__Term__r.Name LIKE '%${anoStr} SEM%')`);
+    // Incluye AnoLectivo__c O nombres de término que contengan el año (ej: "Marzo 2027", "2027SEM1")
+    whereClauses.push(`(AnoLectivo__c = ${anoNum} OR hed__Term__r.Name LIKE '%${anoStr}%')`);
   }
 
   if (opts.termino) {
