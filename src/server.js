@@ -129,43 +129,6 @@ const filtrosBase = {
 
 function crearServidorMcp() {
   const server = new McpServer({ name: "ucema-leadfunnel", version: "3.0.0" });
-  // ── buscar_admitidos ──────────────────────────────────────
-  server.registerTool(
-    "buscar_admitidos",
-    {
-      title: "Buscar admitidos y cápitas",
-      description: "Consulta directamente en Salesforce los postulantes admitidos con su valor de cápita (descuento/beca aplicados) y año lectivo. No requiere cargar sesión en RAM.",
-      inputSchema: {
-        ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
-        nombre: z.string().optional().describe("Nombre o parte del nombre del postulante"),
-        capita_max: z.number().optional().describe("Valor máximo de cápita (ej: 0.9 para buscar postulantes con beca/descuento)"),
-        capita_min: z.number().optional().describe("Valor mínimo de cápita (ej: 0.0)"),
-        limite: z.number().min(1).max(100).optional().describe("Tope de registros a devolver. Default: 50"),
-      },
-    },
-    async (args) => {
-      try {
-        const resultados = await buscarAdmitidos({
-          ano: args.ano,
-          nombre: args.nombre,
-          capitaMax: args.capita_max,
-          capitaMin: args.capita_min,
-          limite: args.limite,
-        });
-
-        return texto({
-          coincidencias: resultados.length,
-          admitidos: resultados,
-        });
-      } catch (err) {
-        console.error("Error al consultar admitidos:", err.message);
-        return texto({
-          error: "Error al consultar los admitidos en Salesforce.",
-          detalle: err.message,
-        });
-      }
-    }
-  );
 
   // ── estado_sesion ─────────────────────────────────────────
   server.registerTool("estado_sesion", {
@@ -283,6 +246,49 @@ function crearServidorMcp() {
     });
   });
 
+// server.js — Agregás este bloque dentro de crearServidorMcp()
+
+  server.registerTool(
+    "buscar_admitidos",
+    {
+      title: "Buscar admitidos y cápitas de Grado",
+      description: "Consulta directamente en hed__Application__c los postulantes admitidos con su valor de cápita. No depende de la sesión de leads en RAM.",
+      inputSchema: {
+        ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
+        limite: z.number().min(1).max(200).optional().describe("Default: 200"),
+      },
+    },
+    async (args) => {
+      try {
+        const res = await buscarAdmitidos({
+          ano: args.ano,
+          limite: args.limite,
+        });
+
+        if (res.totalAdmitidos === 0) {
+          return texto({
+            alerta: "POSIBLE_DESFASAJE_DE_DATOS",
+            mensaje: `La consulta devolvió 0 admitidos en hed__Application__c para el año ${args.ano || 'seleccionado'}. Verifique filtros o tagging.`,
+            totalAdmitidos: 0,
+            totalCapitas: 0,
+          });
+        }
+
+        return texto({
+          totalAdmitidos: res.totalAdmitidos,
+          totalCapitas: res.totalCapitas,
+          admitidos: res.registros,
+        });
+      } catch (err) {
+        console.error("Error al consultar admitidos:", err.message);
+        return texto({
+          error: "ERROR_CONSULTA_SALESFORCE",
+          detalle: err.message,
+        });
+      }
+    }
+  );
+  
   // ── comparar_cohortes ─────────────────────────────────────
   server.registerTool("comparar_cohortes", {
     title: "Comparar dos cohortes",
