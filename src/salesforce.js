@@ -277,6 +277,7 @@ export async function buscarAdmitidos(opts = {}) {
   whereClauses.push("(NOT hed__Term__r.Name LIKE '%Executive%')");
 
   const limite = Math.min(opts.limite || 200, 500);
+  const offset = Math.max(opts.offset || 0, 0);
 
   const query = `SELECT 
       Id, 
@@ -292,9 +293,12 @@ export async function buscarAdmitidos(opts = {}) {
     FROM hed__Application__c 
     WHERE ${whereClauses.join(" AND ")}
     ORDER BY CreatedDate DESC
-    LIMIT ${limite}`;
+    LIMIT ${limite}
+    OFFSET ${offset}`;
 
-  const records = await sf.queryAll(query);
+  // Usamos sf.query en lugar de sf.queryAll para respetar el OFFSET y la paginación exacta
+  const data = await sf.query(query);
+  const records = data.records || [];
 
   const admitidos = records.map(r => ({
     idApplication: r.Id,
@@ -313,6 +317,8 @@ export async function buscarAdmitidos(opts = {}) {
   return {
     totalAdmitidos: admitidos.length,
     totalCapitas: +totalCapitas.toFixed(2),
+    offset,
+    limite,
     registros: admitidos
   };
 }
