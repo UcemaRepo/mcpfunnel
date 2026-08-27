@@ -271,10 +271,10 @@ export async function buscarAdmitidos(opts = {}) {
     whereClauses.push(`hed__Applicant__r.Name LIKE '%${nombreLimpio}%'`);
   }
 
-  // Excluir posgrados del término
-  whereClauses.push("NOT hed__Term__r.Name LIKE '%Posgrado%'");
-  whereClauses.push("NOT hed__Term__r.Name LIKE '%Maestría%'");
-  whereClauses.push("NOT hed__Term__r.Name LIKE '%Executive%'");
+  // Excluir posgrados con sintaxis SOQL válida
+  whereClauses.push("(NOT hed__Term__r.Name LIKE '%Posgrado%')");
+  whereClauses.push("(NOT hed__Term__r.Name LIKE '%Maestría%')");
+  whereClauses.push("(NOT hed__Term__r.Name LIKE '%Executive%')");
 
   const limite = Math.min(opts.limite || 200, 500);
 
