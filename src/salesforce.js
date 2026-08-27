@@ -250,8 +250,6 @@ export async function cargarLeads(opts = {}) {
     campanasDescartadas: Array.from(campanasDescartadas).sort(),
   };
 }
-
-// ── Consulta directa al objeto de Solicitudes (hed__Application__c) ──────
 // ── Consulta directa al objeto de Solicitudes (hed__Application__c) delimitada a Grado ──────
 export async function buscarAdmitidos(opts = {}) {
   const creds = await autenticar();
@@ -262,7 +260,9 @@ export async function buscarAdmitidos(opts = {}) {
   let whereClauses = [
     "hed__Application_Status__c = 'Admit'",
     `OwnerId IN (${ownerIn})`, // Delimitación por los 6 asesores de Grado
-    "NOT (hed__Term__r.Name LIKE '%Posgrado%' OR hed__Term__r.Name LIKE '%Maestría%' OR hed__Term__r.Name LIKE '%Executive%')"
+    "NOT hed__Term__r.Name LIKE '%Posgrado%'",
+    "NOT hed__Term__r.Name LIKE '%Maestría%'",
+    "NOT hed__Term__r.Name LIKE '%Executive%'"
   ];
 
   if (opts.ano) {
