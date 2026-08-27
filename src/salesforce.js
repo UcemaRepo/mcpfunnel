@@ -362,6 +362,7 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── NUEVA FUNCIÓN: Agregación masiva mediante GROUP BY directa en Salesforce ──────
+// ── Agregación por GROUP BY directa (Criterio Académico Estricto por Término) ──
 export async function resumirAdmitidosCapitas(opts = {}) {
   const creds = await autenticar();
   const sf = crearCliente(creds);
@@ -374,10 +375,16 @@ export async function resumirAdmitidosCapitas(opts = {}) {
     "(NOT hed__Term__r.Name LIKE '%Septiembre%')"
   ];
 
+  // Si se pasa un año (ej. 2027), filtramos por los términos exactos de ese ciclo
   if (opts.ano) {
-    const anoNum = Number(opts.ano);
     const anoStr = String(opts.ano);
-    whereClauses.push(`(AnoLectivo__c = ${anoNum} OR hed__Term__r.Name LIKE '${anoStr}SEM%' OR hed__Term__r.Name LIKE '${anoStr} SEM%')`);
+    whereClauses.push(`(hed__Term__r.Name LIKE '${anoStr}SEM%' OR hed__Term__r.Name LIKE '${anoStr} SEM%')`);
+  }
+
+  // Si se pasa un término/semestre específico (ej. "2027SEM 1")
+  if (opts.termino) {
+    const termLimpio = opts.termino.replace(/'/g, "\\'");
+    whereClauses.push(`hed__Term__r.Name LIKE '%${termLimpio}%'`);
   }
 
   const query = `SELECT 
@@ -401,7 +408,7 @@ export async function resumirAdmitidosCapitas(opts = {}) {
   const granTotalCapitas = desglose.reduce((a, b) => a + b.totalCapitas, 0);
 
   return {
-    anoConsultado: opts.ano || "Todos",
+    filtroAplicado: opts.ano ? `Año ${opts.ano}` : opts.termino ? `Término ${opts.termino}` : "Todos",
     totalAdmitidos: granTotalAdmitidos,
     totalCapitas: +granTotalCapitas.toFixed(2),
     desglosePorTermino: desglose
