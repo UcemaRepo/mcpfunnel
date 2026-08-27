@@ -91,6 +91,7 @@ const texto = (obj) => ({
 function filtrar(leads, a = {}) {
   const n = (s) => normalizar(s || "");
   let res = leads;
+  if (a.nombre)   res = res.filter(l => n(l.nombre).includes(n(a.nombre)));
   if (a.cohorte)  res = res.filter(l => l.cohorte === canonSemestre(a.cohorte));
   if (a.asesor)   res = res.filter(l => n(l.asesor).includes(n(a.asesor)));
   if (a.programa) res = res.filter(l => n(l.programa).includes(n(a.programa)));
@@ -105,6 +106,7 @@ function filtrar(leads, a = {}) {
 }
 
 const filtrosBase = {
+  nombre:   z.string().optional().describe("Nombre o apellido del postulante/alumno"),
   cohorte:  z.string().optional().describe("Cohorte/semestre: 2026S1, 2027S1, 2026S2. También acepta '2027SEM 1'."),
   asesor:   z.string().optional().describe("Nombre o parte del nombre del asesor"),
   programa: z.string().optional().describe("Sigla o nombre del programa, ej. INIA, LIEM"),
@@ -220,19 +222,21 @@ function crearServidorMcp() {
     description: "Consulta directamente en hed__Application__c los postulantes admitidos con su valor de cápita. No depende de la sesión de leads en RAM.",
     inputSchema: {
       ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
+      nombre: z.string().optional().describe("Nombre o apellido del postulante/alumno para filtrar en Salesforce"),
       limite: z.number().min(1).max(200).optional().describe("Default: 200"),
     },
   }, async (args) => {
     try {
       const res = await buscarAdmitidos({
         ano: args.ano,
+        nombre: args.nombre,
         limite: args.limite,
       });
 
       if (res.totalAdmitidos === 0) {
         return texto({
           alerta: "POSIBLE_DESFASAJE_DE_DATOS",
-          mensaje: `La consulta devolvió 0 admitidos en hed__Application__c para el año ${args.ano || 'seleccionado'}. Verifique filtros o tagging.`,
+          mensaje: `La consulta devolvió 0 admitidos en hed__Application__c para el filtro aplicado. Verifique filtros o tagging.`,
           totalAdmitidos: 0,
           totalCapitas: 0,
         });
