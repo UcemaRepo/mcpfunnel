@@ -420,4 +420,3 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
     desglosePorTermino: desglose
   };
 }
-}
