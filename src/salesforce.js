@@ -371,6 +371,7 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── Agregación basada en la Sesión Activa del Funnel (Opción 1) ──────────────
+// ── Agregación por Cohorte Exacta del Funnel (Opción 1 Ajustada) ─────────────
 export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   if (!sesionActiva || !sesionActiva.leads) {
     throw new Error("No hay una sesión activa del funnel cargada en memoria.");
@@ -378,13 +379,21 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
 
   let leads = sesionActiva.leads;
 
+  // 1. Filtrado por año o por cohorte exacta si se especifica
   if (opts.ano) {
     const anoStr = String(opts.ano);
-    leads = leads.filter(l => l.cohorte && l.cohorte.includes(anoStr));
+    // Si se pasa 2027, matcheamos con cohortes que comiencen o terminen estrictamente en el año lectivo
+    leads = leads.filter(l => l.cohorte && l.cohorte.startsWith(anoStr));
   }
 
-  const admitidos = leads.filter(l => l.admitido === true);
+  if (opts.termino) {
+    leads = leads.filter(l => l.cohorte === opts.termino);
+  }
 
+  // 2. Solo considerar los admitidos según la misma condición del embudo
+  const admitidos = leads.filter(l => l.admitido === true || l.etapa === "admitidos" || l.estado === "Admitido");
+
+  // 3. Agrupamiento por cohorte exacta del funnel
   const porCohorte = {};
   for (const a of admitidos) {
     const coh = a.cohorte || "Sin Cohorte";
@@ -405,9 +414,10 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   const totalCapitas = desglose.reduce((a, b) => a + b.totalCapitas, 0);
 
   return {
-    filtroAplicado: opts.ano ? `Año ${opts.ano}` : "Todos",
+    filtroAplicado: opts.ano ? `Año ${opts.ano}` : opts.termino ? `Término ${opts.termino}` : "Todos",
     totalAdmitidos,
     totalCapitas: +totalCapitas.toFixed(2),
     desglosePorTermino: desglose
   };
+}
 }
