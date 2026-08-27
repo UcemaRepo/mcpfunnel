@@ -14,10 +14,8 @@ import {
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-// ── Estado en RAM ───────────────────────────────────────────
 let sesion = null;
 
-// ── Auth ────────────────────────────────────────────────────
 function auth(req, res, next) {
   const esperado = process.env.MCP_TOKEN;
   const recibido =
@@ -26,10 +24,6 @@ function auth(req, res, next) {
   if (!esperado || recibido !== esperado) return res.status(404).end();
   next();
 }
-
-// ============================================================
-// CONTROL
-// ============================================================
 
 app.post("/cargar", auth, async (req, res) => {
   try {
@@ -70,16 +64,12 @@ app.get("/health", (req, res) => {
   });
 });
 
-// ============================================================
-// MCP
-// ============================================================
-
 const sinSesion = () => ({
   content: [{
     type: "text",
     text: JSON.stringify({
       error: "No hay sesión cargada en memoria.",
-      accion: "Ejecutar POST /cargar. Si el servicio estuvo inactivo, Render lo apagó y la sesión se perdió.",
+      accion: "Ejecutar POST /cargar.",
     }, null, 2),
   }],
 });
@@ -107,24 +97,23 @@ function filtrar(leads, a = {}) {
 
 const filtrosBase = {
   nombre:   z.string().optional().describe("Nombre o apellido del postulante/alumno"),
-  cohorte:  z.string().optional().describe("Cohorte/semestre: 2026S1, 2027S1, 2026S2. También acepta '2027SEM 1'."),
-  asesor:   z.string().optional().describe("Nombre o parte del nombre del asesor"),
-  programa: z.string().optional().describe("Sigla o nombre del programa, ej. INIA, LIEM"),
-  colegio:  z.string().optional().describe("Nombre o parte del nombre del colegio"),
-  origen:   z.string().optional().describe("Origen: Unbounce, Consulta Web, Visitas de Colegios, Referido"),
-  estado:   z.string().optional().describe("Estado exacto: Nuevo, Contactado, Qualified, Unqualified, Desiste, Negociando"),
+  cohorte:  z.string().optional().describe("Cohorte/semestre: 2026S1, 2027S1."),
+  asesor:   z.string().optional().describe("Nombre del asesor"),
+  programa: z.string().optional().describe("Sigla o nombre del programa"),
+  colegio:  z.string().optional().describe("Colegio de origen"),
+  origen:   z.string().optional().describe("Origen"),
+  estado:   z.string().optional().describe("Estado exacto"),
   admitido: z.boolean().optional().describe("true = solo admitidos, false = solo no admitidos"),
-  desde:    z.string().optional().describe("Fecha de creación mínima, YYYY-MM-DD"),
-  hasta:    z.string().optional().describe("Fecha de creación máxima, YYYY-MM-DD"),
+  desde:    z.string().optional().describe("Fecha mínima YYYY-MM-DD"),
+  hasta:    z.string().optional().describe("Fecha máxima YYYY-MM-DD"),
 };
 
 function crearServidorMcp() {
-  const server = new McpServer({ name: "ucema-leadfunnel", version: "3.0.0" });
+  const server = new McpServer({ name: "ucema-leadfunnel", version: "3.2.0" });
 
-  // ── estado_sesion ─────────────────────────────────────────
   server.registerTool("estado_sesion", {
     title: "Estado de la sesión",
-    description: "Indica si hay datos cargados en memoria, cuántos leads, qué cohortes están disponibles y el embudo global.",
+    description: "Muestra estado de la sesión en RAM.",
     inputSchema: {},
   }, async () => {
     if (!sesion) return sinSesion();
@@ -140,7 +129,6 @@ function crearServidorMcp() {
     });
   });
 
-  // ── embudo ────────────────────────────────────────────────
   server.registerTool("embudo", {
     title: "Embudo de admisión",
     description: "Conteos del embudo y tasas de conversión.",
@@ -166,10 +154,9 @@ function crearServidorMcp() {
     return texto(out);
   });
 
-  // ── curva_temporal ────────────────────────────────────────
   server.registerTool("curva_temporal", {
     title: "Curva mes a mes",
-    description: "Evolución mensual de una o más cohortes.",
+    description: "Evolución mensual de cohortes.",
     inputSchema: {
       cohortes: z.array(z.string()).optional(),
       alinear: z.boolean().optional(),
@@ -186,7 +173,7 @@ function crearServidorMcp() {
     const out = {};
     for (const c of cohortes) {
       const ls = filtrar(sesion.leads, { cohorte: c, asesor: args.asesor, origen: args.origen });
-      if (!ls.length) { out[c] = { error: "Sin datos para este filtro." }; continue; }
+      if (!ls.length) { out[c] = { error: "Sin datos." }; continue; }
 
       const porMes = {};
       for (const l of ls) {
@@ -216,56 +203,47 @@ function crearServidorMcp() {
     return texto({ alineado: !!args.alinear, cohortes: out });
   });
 
-  // ── buscar_admitidos ──────────────────────────────────────
   server.registerTool("buscar_admitidos", {
     title: "Buscar admitidos y cápitas de Grado",
-    description: "Consulta directamente en hed__Application__c los postulantes admitidos con su valor de cápita. No depende de la sesión de leads en RAM.",
+    description: "Consulta paginada directamente en hed__Application__c para Grado.",
     inputSchema: {
-      ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
-      nombre: z.string().optional().describe("Nombre o apellido del postulante/alumno para filtrar en Salesforce"),
-      limite: z.number().min(1).max(200).optional().describe("Default: 200"),
+      ano: z.number().optional().describe("Año lectivo a consultar, ej: 2027"),
+      nombre: z.string().optional().describe("Nombre o apellido del postulante/alumno"),
+      limite: z.number().min(1).max(500).optional().describe("Registros por página (default: 200, máx: 500)"),
       offset: z.number().min(0).optional().describe("Punto de inicio para paginación (default: 0)"),
+      capita_min: z.number().optional().describe("Filtrar por valor de cápita mínimo"),
+      capita_max: z.number().optional().describe("Filtrar por valor de cápita máximo"),
     },
   }, async (args) => {
     try {
-      const res = await buscarAdmitidos({
-        ano: args.ano,
-        nombre: args.nombre,
-        limite: args.limite,
-        offset: args.offset,
-      });
-
-      if (res.totalAdmitidos === 0) {
-        return texto({
-          alerta: "POSIBLE_DESFASAJE_DE_DATOS",
-          mensaje: `La consulta devolvió 0 admitidos en hed__Application__c para el filtro aplicado. Verifique filtros o tagging.`,
-          totalAdmitidos: 0,
-          totalCapitas: 0,
-          offset: res.offset,
-          limite: res.limite,
-        });
-      }
-
-      return texto({
-        totalAdmitidos: res.totalAdmitidos,
-        totalCapitas: res.totalCapitas,
-        offset: res.offset,
-        limite: res.limite,
-        admitidos: res.registros,
-      });
+      const res = await buscarAdmitidos(args);
+      return texto(res);
     } catch (err) {
       console.error("Error al consultar admitidos:", err.message);
-      return texto({
-        error: "ERROR_CONSULTA_SALESFORCE",
-        detalle: err.message,
-      });
+      return texto({ error: "ERROR_CONSULTA_SALESFORCE", detalle: err.message });
     }
   });
 
-  // ── comparar_cohortes ─────────────────────────────────────
+  server.registerTool("resumir_admitidos_capitas", {
+    title: "Resumen totalizado de admitidos y cápitas del Funnel",
+    description: "Devuelve los totales de admitidos y suma de cápitas agregados exactamente según los datos del embudo activo en memoria.",
+    inputSchema: {
+      ano: z.number().optional().describe("Año lectivo a resumir (ej: 2027)"),
+    },
+  }, async (args) => {
+    if (!sesion) return sinSesion();
+    try {
+      const res = await resumirAdmitidosCapitas(args, sesion);
+      return texto(res);
+    } catch (err) {
+      console.error("Error al resumir admitidos:", err.message);
+      return texto({ error: "ERROR_RESUMEN_FUNNEL", detalle: err.message });
+    }
+  });
+
   server.registerTool("comparar_cohortes", {
     title: "Comparar dos cohortes",
-    description: "Compara dos cohortes lado a lado.",
+    description: "Compara dos cohortes.",
     inputSchema: {
       cohorte_a: z.string(),
       cohorte_b: z.string(),
@@ -314,10 +292,9 @@ function crearServidorMcp() {
     });
   });
 
-  // ── buscar_leads ──────────────────────────────────────────
   server.registerTool("buscar_leads", {
     title: "Buscar leads",
-    description: "Devuelve hasta 50 leads individuales filtrados.",
+    description: "Devuelve hasta 50 leads individuales.",
     inputSchema: {
       ...filtrosBase,
       orden: z.enum(["reciente", "antiguo"]).optional(),
@@ -343,27 +320,9 @@ function crearServidorMcp() {
     });
   });
 
-server.registerTool("resumir_admitidos_capitas", {
-    title: "Resumen totalizado de admitidos y cápitas de Grado",
-    description: "Realiza una agregación por GROUP BY directamente en Salesforce. Devuelve totales de admitidos y suma de cápitas por término sin limite de paginación.",
-    inputSchema: {
-      ano: z.number().optional().describe("Año lectivo a resumir (ej: 2027)"),
-    },
-  }, async (args) => {
-    try {
-      const res = await resumirAdmitidosCapitas(args);
-      return texto(res);
-    } catch (err) {
-      console.error("Error al resumir admitidos:", err.message);
-      return texto({ error: "ERROR_RESUMEN_SALESFORCE", detalle: err.message });
-    }
-  });
-  
   return server;
 }
 
-
-// ── Transporte MCP stateless ────────────────────────────────
 app.post("/mcp", auth, async (req, res) => {
   try {
     const server = crearServidorMcp();
@@ -393,5 +352,5 @@ app.get("/mcp", auth, (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`LeadFunnel MCP v3 escuchando en :${PORT}`);
+  console.log(`LeadFunnel MCP v3.2 escuchando en :${PORT}`);
 });
