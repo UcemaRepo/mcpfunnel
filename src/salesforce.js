@@ -371,7 +371,6 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── Agregación basada en la Sesión Activa del Funnel (Opción 1) ──────────────
-// ── Agregación por Cohorte Exacta del Funnel (Opción 1 Ajustada) ─────────────
 export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   if (!sesionActiva || !sesionActiva.leads) {
     throw new Error("No hay una sesión activa del funnel cargada en memoria.");
@@ -379,29 +378,39 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
 
   let leads = sesionActiva.leads;
 
-  // 1. Filtrado por año o por cohorte exacta si se especifica
+  // 1. Aplicar filtro de cohorte/año idéntico al embudo
   if (opts.ano) {
     const anoStr = String(opts.ano);
-    // Si se pasa 2027, matcheamos con cohortes que comiencen o terminen estrictamente en el año lectivo
-    leads = leads.filter(l => l.cohorte && l.cohorte.startsWith(anoStr));
+    leads = leads.filter(l => l.cohorte && String(l.cohorte).startsWith(anoStr));
   }
 
   if (opts.termino) {
     leads = leads.filter(l => l.cohorte === opts.termino);
   }
 
-  // 2. Solo considerar los admitidos según la misma condición del embudo
-  const admitidos = leads.filter(l => l.admitido === true || l.etapa === "admitidos" || l.estado === "Admitido");
+  // 2. Filtrar strictly por los que superan o alcanzan la etapa de 'Admitido' según la jerarquía del funnel
+  // (Ajustá 'Admitido' o 'admitidos' según el nombre exacto de la etapa en tu definición de etapas)
+  const admitidosStrict = leads.filter(l => {
+    const estado = (l.estado || l.etapa || "").toLowerCase();
+    const esAdmitido = estado.includes("admitido") || estado.includes("admitida") || l.admitido === true;
+    
+    // Si la sesión o el lead tienen un flag de exclusión de programa/nivel, lo respetamos
+    const esValido = !l.excluido; 
+    
+    return esAdmitido && esValido;
+  });
 
-  // 3. Agrupamiento por cohorte exacta del funnel
+  // 3. Agrupar por cohorte exacta
   const porCohorte = {};
-  for (const a of admitidos) {
+  for (const a of admitidosStrict) {
     const coh = a.cohorte || "Sin Cohorte";
     if (!porCohorte[coh]) {
       porCohorte[coh] = { totalAdmitidos: 0, totalCapitas: 0 };
     }
     porCohorte[coh].totalAdmitidos += 1;
-    porCohorte[coh].totalCapitas += (Number(a.capita) || 1);
+    // Asegurar parseo numérico de la cápita asignada
+    const valCapita = typeof a.capita === "number" ? a.capita : parseFloat(a.capita) || 1;
+    porCohorte[coh].totalCapitas += valCapita;
   }
 
   const desglose = Object.keys(porCohorte).sort().map(c => ({
