@@ -264,3 +264,60 @@ export async function cargarLeads(opts = {}) {
     campanasDescartadas: Array.from(campanasDescartadas).sort(),
   };
 }
+// ── Consulta de Admitidos y Cápitas ──────────────────────────
+export async function buscarAdmitidos(opts = {}) {
+  const creds = await autenticar();
+  const sf = crearCliente(creds);
+
+  let whereClauses = ["hed__Application_Status__c = 'Admit'"];
+
+  // Filtro por Año Lectivo
+  if (opts.ano) {
+    whereClauses.push(`AnoLectivo__c = ${Number(opts.ano)}`);
+  }
+
+  // Filtro por rango de Cápita
+  if (opts.capitaMax !== undefined && opts.capitaMax !== null) {
+    whereClauses.push(`Capita__c <= ${Number(opts.capitaMax)}`);
+  }
+  if (opts.capitaMin !== undefined && opts.capitaMin !== null) {
+    whereClauses.push(`Capita__c >= ${Number(opts.capitaMin)}`);
+  }
+
+  // Filtro por Nombre de Postulante
+  if (opts.nombre) {
+    const nombreLimpio = opts.nombre.replace(/'/g, "\\'");
+    whereClauses.push(`hed__Applicant__r.Name LIKE '%${nombreLimpio}%'`);
+  }
+
+  const limite = Math.min(opts.limite || 50, 100);
+
+  const query = `SELECT 
+      Id, 
+      Name, 
+      hed__Applicant__c, 
+      hed__Applicant__r.Name, 
+      hed__Application_Status__c, 
+      hed__Application_Date__c, 
+      AnoLectivo__c, 
+      Capita__c,
+      hed__Term__r.Name
+    FROM hed__Application__c 
+    WHERE ${whereClauses.join(" AND ")}
+    ORDER BY CreatedDate DESC
+    LIMIT ${limite}`;
+
+  const records = await sf.queryAll(query);
+
+  return records.map(r => ({
+    idApplication: r.Id,
+    numeroSolicitud: r.Name,
+    idContacto: r.hed__Applicant__c,
+    nombreAlumno: r.hed__Applicant__r ? r.hed__Applicant__r.Name : "Sin Nombre",
+    estado: r.hed__Application_Status__c,
+    fechaSolicitud: r.hed__Application_Date__c,
+    anoLectivo: r.AnoLectivo__c,
+    capita: r.Capita__c,
+    termino: r.hed__Term__r ? r.hed__Term__r.Name : null
+  }));
+}
