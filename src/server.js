@@ -1288,6 +1288,89 @@ function terminoInfoSeguro(
   };
 }
 
+app.get(
+  "/debug/duplicados-dni",
+  (req, res) => {
+    try {
+      const data = getSesion();
+
+      const apps =
+        data.admitidosSalesforce || [];
+
+      const mapa = new Map();
+
+      for (const app of apps) {
+        if (!app.dni) continue;
+
+        if (!mapa.has(app.dni)) {
+          mapa.set(app.dni, []);
+        }
+
+        mapa.get(app.dni).push(app);
+      }
+
+      const duplicados = [];
+
+      for (const [dni, registros] of mapa) {
+        if (registros.length > 1) {
+          duplicados.push({
+            dni,
+            cantidad: registros.length,
+            capitas: +registros
+              .reduce(
+                (sum, a) =>
+                  sum +
+                  (Number(a.capita) || 0),
+                0
+              )
+              .toFixed(2),
+
+            personas: registros.map(
+              (a) => ({
+                idApplication:
+                  a.idApplication,
+
+                idContacto:
+                  a.idContacto,
+
+                nombre:
+                  a.nombreAlumno,
+
+                termino:
+                  a.termino,
+
+                terminoOriginal:
+                  a.terminoOriginal,
+
+                capita:
+                  a.capita,
+              })
+            ),
+          });
+        }
+      }
+
+      return ok(res, {
+        totalAdmitidos:
+          apps.length,
+
+        dnisUnicos:
+          mapa.size,
+
+        cantidadDnisDuplicados:
+          duplicados.length,
+
+        duplicados,
+      });
+    } catch (error) {
+      return errorResponse(
+        res,
+        error,
+        400
+      );
+    }
+  }
+);
 // ============================================================
 // 404
 // ============================================================
