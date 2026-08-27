@@ -228,7 +228,8 @@ function crearServidorMcp() {
     title: "Resumen totalizado de admitidos y cápitas del Funnel",
     description: "Devuelve los totales de admitidos y suma de cápitas agregados exactamente según los datos del embudo activo en memoria.",
     inputSchema: {
-      ano: z.number().optional().describe("Año lectivo a resumir (ej: 2027)"),
+      termino: z.string().optional().describe("Semestre/término específico a resumir (ej: '2027S1', '2026S2')"),
+      ano: z.union([z.number(), z.string()]).optional().describe("Año lectivo a resumir (ej: 2027)"),
     },
   }, async (args) => {
     if (!sesion) return sinSesion();
@@ -325,6 +326,13 @@ function crearServidorMcp() {
 
 app.post("/mcp", auth, async (req, res) => {
   try {
+    // Garantizar desestructuración uniforme de argumentos provenientes de clientes JSON-RPC/MCP
+    if (req.body?.params?.arguments) {
+      req.body.params.arguments = req.body.params.arguments;
+    } else if (req.body?.arguments) {
+      req.body.params = { ...(req.body.params || {}), arguments: req.body.arguments };
+    }
+
     const server = crearServidorMcp();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => { transport.close(); server.close(); });
