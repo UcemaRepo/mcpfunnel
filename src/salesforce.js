@@ -371,6 +371,7 @@ export async function buscarAdmitidos(opts = {}) {
 }
 
 // ── Agregación basada en la Sesión Activa del Funnel (Opción 1) ──────────────
+// ── Agregación Precisa de Admitidos y Cápitas por Candidato Único ────────────
 export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   if (!sesionActiva || !sesionActiva.leads) {
     throw new Error("No hay una sesión activa del funnel cargada en memoria.");
@@ -378,39 +379,40 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
 
   let leads = sesionActiva.leads;
 
-  // 1. Aplicar filtro de cohorte/año idéntico al embudo
-  if (opts.ano) {
-    const anoStr = String(opts.ano);
-    leads = leads.filter(l => l.cohorte && String(l.cohorte).startsWith(anoStr));
-  }
-
+  // 1. Filtrar por término exacto (ej: "2027S1") o año (ej: 2027)
   if (opts.termino) {
-    leads = leads.filter(l => l.cohorte === opts.termino);
+    const termBuscado = String(opts.termino).trim();
+    leads = leads.filter(l => l.cohorte === termBuscado);
+  } else if (opts.ano) {
+    const anoStr = String(opts.ano);
+    leads = leads.filter(l => l.cohorte && l.cohorte.startsWith(anoStr));
   }
 
-  // 2. Filtrar strictly por los que superan o alcanzan la etapa de 'Admitido' según la jerarquía del funnel
-  // (Ajustá 'Admitido' o 'admitidos' según el nombre exacto de la etapa en tu definición de etapas)
-  const admitidosStrict = leads.filter(l => {
-    const estado = (l.estado || l.etapa || "").toLowerCase();
-    const esAdmitido = estado.includes("admitido") || estado.includes("admitida") || l.admitido === true;
-    
-    // Si la sesión o el lead tienen un flag de exclusión de programa/nivel, lo respetamos
-    const esValido = !l.excluido; 
-    
-    return esAdmitido && esValido;
-  });
+  // 2. Solo tomamos los admitidos
+  const admitidos = leads.filter(l => l.admitido === true);
 
-  // 3. Agrupar por cohorte exacta
+  // 3. Desduplicar por DNI / Candidato para no contar el mismo alumno múltiples veces
+  const admitidosUnicosMap = new Map();
+
+  for (const l of admitidos) {
+    // Clave única por DNI o ID de candidato
+    const claveUnica = l.dni || l.idCandidato || l.id;
+    if (!admitidosUnicosMap.has(claveUnica)) {
+      admitidosUnicosMap.set(claveUnica, l);
+    }
+  }
+
+  const admitidosUnicos = Array.from(admitidosUnicosMap.values());
+
+  // 4. Agrupar por cohorte exacta
   const porCohorte = {};
-  for (const a of admitidosStrict) {
+  for (const a of admitidosUnicos) {
     const coh = a.cohorte || "Sin Cohorte";
     if (!porCohorte[coh]) {
       porCohorte[coh] = { totalAdmitidos: 0, totalCapitas: 0 };
     }
     porCohorte[coh].totalAdmitidos += 1;
-    // Asegurar parseo numérico de la cápita asignada
-    const valCapita = typeof a.capita === "number" ? a.capita : parseFloat(a.capita) || 1;
-    porCohorte[coh].totalCapitas += valCapita;
+    porCohorte[coh].totalCapitas += (Number(a.capita) || 1);
   }
 
   const desglose = Object.keys(porCohorte).sort().map(c => ({
@@ -423,7 +425,7 @@ export async function resumirAdmitidosCapitas(opts = {}, sesionActiva = null) {
   const totalCapitas = desglose.reduce((a, b) => a + b.totalCapitas, 0);
 
   return {
-    filtroAplicado: opts.ano ? `Año ${opts.ano}` : opts.termino ? `Término ${opts.termino}` : "Todos",
+    filtroAplicado: opts.termino ? `Término ${opts.termino}` : opts.ano ? `Año ${opts.ano}` : "Todos",
     totalAdmitidos,
     totalCapitas: +totalCapitas.toFixed(2),
     desglosePorTermino: desglose
