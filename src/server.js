@@ -1294,8 +1294,19 @@ app.get(
     try {
       const data = getSesion();
 
+      const terminoBuscado =
+        normalizarTermino(
+          req.query.termino || "2027S1"
+        );
+
       const apps =
-        data.admitidosSalesforce || [];
+        (data.admitidosSalesforce || [])
+          .filter((app) =>
+            terminosCompatibles(
+              terminoBuscado,
+              app.termino
+            )
+          );
 
       const mapa = new Map();
 
@@ -1316,6 +1327,7 @@ app.get(
           duplicados.push({
             dni,
             cantidad: registros.length,
+
             capitas: +registros
               .reduce(
                 (sum, a) =>
@@ -1350,9 +1362,23 @@ app.get(
         }
       }
 
+      const capitasTotal =
+        apps.reduce(
+          (sum, a) =>
+            sum +
+            (Number(a.capita) || 0),
+          0
+        );
+
       return ok(res, {
+        filtro:
+          terminoBuscado,
+
         totalAdmitidos:
           apps.length,
+
+        totalCapitas:
+          +capitasTotal.toFixed(2),
 
         dnisUnicos:
           mapa.size,
@@ -1360,8 +1386,16 @@ app.get(
         cantidadDnisDuplicados:
           duplicados.length,
 
+        registrosDuplicados:
+          duplicados.reduce(
+            (sum, d) =>
+              sum + d.cantidad,
+            0
+          ),
+
         duplicados,
       });
+
     } catch (error) {
       return errorResponse(
         res,
