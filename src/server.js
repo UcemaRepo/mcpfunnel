@@ -13,7 +13,7 @@ import express from "express";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { cargarLeads } from "./salesforce.js";
+import { cargarLeads, buscarAdmitidos } from "./salesforce.js";
 import {
   contarEmbudo, tasas, agregarPor, coincideEstado, normalizar, canonSemestre,
 } from "./transform.js";
@@ -129,6 +129,43 @@ const filtrosBase = {
 
 function crearServidorMcp() {
   const server = new McpServer({ name: "ucema-leadfunnel", version: "3.0.0" });
+  // ── buscar_admitidos ──────────────────────────────────────
+  server.registerTool(
+    "buscar_admitidos",
+    {
+      title: "Buscar admitidos y cápitas",
+      description: "Consulta directamente en Salesforce los postulantes admitidos con su valor de cápita (descuento/beca aplicados) y año lectivo. No requiere cargar sesión en RAM.",
+      inputSchema: {
+        ano: z.number().optional().describe("Año lectivo a consultar, ej: 2026"),
+        nombre: z.string().optional().describe("Nombre o parte del nombre del postulante"),
+        capita_max: z.number().optional().describe("Valor máximo de cápita (ej: 0.9 para buscar postulantes con beca/descuento)"),
+        capita_min: z.number().optional().describe("Valor mínimo de cápita (ej: 0.0)"),
+        limite: z.number().min(1).max(100).optional().describe("Tope de registros a devolver. Default: 50"),
+      },
+    },
+    async (args) => {
+      try {
+        const resultados = await buscarAdmitidos({
+          ano: args.ano,
+          nombre: args.nombre,
+          capitaMax: args.capita_max,
+          capitaMin: args.capita_min,
+          limite: args.limite,
+        });
+
+        return texto({
+          coincidencias: resultados.length,
+          admitidos: resultados,
+        });
+      } catch (err) {
+        console.error("Error al consultar admitidos:", err.message);
+        return texto({
+          error: "Error al consultar los admitidos en Salesforce.",
+          detalle: err.message,
+        });
+      }
+    }
+  );
 
   // ── estado_sesion ─────────────────────────────────────────
   server.registerTool("estado_sesion", {
