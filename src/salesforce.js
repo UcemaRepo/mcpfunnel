@@ -252,11 +252,18 @@ export async function cargarLeads(opts = {}) {
 }
 
 // ── Consulta directa al objeto de Solicitudes (hed__Application__c) ──────
+// ── Consulta directa al objeto de Solicitudes (hed__Application__c) delimitada a Grado ──────
 export async function buscarAdmitidos(opts = {}) {
   const creds = await autenticar();
   const sf = crearCliente(creds);
 
-  let whereClauses = ["hed__Application_Status__c = 'Admit'"];
+  const ownerIn = ASESOR_IDS.map(i => `'${i}'`).join(",");
+
+  let whereClauses = [
+    "hed__Application_Status__c = 'Admit'",
+    `OwnerId IN (${ownerIn})`, // Delimitación por los 6 asesores de Grado
+    "NOT (hed__Term__r.Name LIKE '%Posgrado%' OR hed__Term__r.Name LIKE '%Maestría%' OR hed__Term__r.Name LIKE '%Executive%')"
+  ];
 
   if (opts.ano) {
     whereClauses.push(`AnoLectivo__c = ${Number(opts.ano)}`);
@@ -273,7 +280,8 @@ export async function buscarAdmitidos(opts = {}) {
       hed__Application_Date__c, 
       AnoLectivo__c, 
       Capita__c,
-      hed__Term__r.Name
+      hed__Term__r.Name,
+      OwnerId
     FROM hed__Application__c 
     WHERE ${whereClauses.join(" AND ")}
     ORDER BY CreatedDate DESC
@@ -296,6 +304,7 @@ export async function buscarAdmitidos(opts = {}) {
   const totalCapitas = admitidos.reduce((acc, r) => acc + (r.capita || 0), 0);
 
   return {
+    filtroAplicado: "Solo Grado (Asesores delimitados)",
     totalAdmitidos: admitidos.length,
     totalCapitas: +totalCapitas.toFixed(2),
     registros: admitidos
