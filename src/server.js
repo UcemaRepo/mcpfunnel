@@ -22,12 +22,91 @@ import {
 
 const app = express();
 
+// ============================================================
+// SEGURIDAD
+// ============================================================
+//
+// Este servicio expone datos personales de aspirantes, muchos
+// de ellos menores de edad. Sin autenticacion, cualquiera con
+// la URL de Render puede descargarlos enteros.
+//
+// Dos capas:
+//
+//   1. CORS restringido a origenes conocidos (ORIGENES_PERMITIDOS).
+//      origin:true reflejaba CUALQUIER origen, lo que permitia
+//      que cualquier web llamara a esta API desde el navegador.
+//
+//   2. Token obligatorio en TODA ruta salvo /health.
+// ============================================================
+
+const ORIGENES_PERMITIDOS =
+  (process.env.ORIGENES_PERMITIDOS || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
 app.use(
   cors({
-    origin: true,
+    origin(origin, cb) {
+      // Sin header Origin (curl, server-to-server, MCP): se permite.
+      // La proteccion real la da el token, no el CORS.
+      if (!origin) return cb(null, true);
+
+      if (
+        ORIGENES_PERMITIDOS.length === 0 ||
+        ORIGENES_PERMITIDOS.includes(origin)
+      ) {
+        return cb(null, true);
+      }
+
+      return cb(
+        new Error("Origen no permitido: " + origin)
+      );
+    },
     credentials: true,
   })
 );
+
+// ------------------------------------------------------------
+// auth — token obligatorio
+// ------------------------------------------------------------
+//
+// Acepta el token de dos formas:
+//
+//   Authorization: Bearer <token>   (curl, scripts)
+//   ?k=<token>                      (conectores de Claude, que
+//                                    no permiten headers propios)
+//
+// Responde 404 y no 401 a proposito: un 401 hace que los
+// clientes MCP intenten un flujo OAuth que este servidor no
+// implementa. Un 404 simplemente no revela que la ruta existe.
+//
+// Si MCP_TOKEN no esta definido, NADA pasa el filtro. Es
+// deliberado: preferimos que el servicio no funcione a que
+// quede abierto por una variable de entorno faltante.
+// ------------------------------------------------------------
+
+function auth(req, res, next) {
+  const esperado = process.env.MCP_TOKEN;
+
+  if (!esperado) {
+    console.error(
+      "MCP_TOKEN no esta definido: se rechazan todos los requests."
+    );
+    return res.status(404).end();
+  }
+
+  const recibido =
+    req.query.k ||
+    (req.headers.authorization || "")
+      .replace(/^Bearer\s+/i, "");
+
+  if (recibido !== esperado) {
+    return res.status(404).end();
+  }
+
+  next();
+}
 
 app.use(
   express.json({
@@ -88,6 +167,11 @@ function getSesion() {
 app.get(
   "/",
   (req, res) => {
+    // Health check publico (Render lo necesita sin token).
+    //
+    // NO devuelve conteos ni fechas de carga: eso ya es
+    // informacion sobre los datos. Para el estado real
+    // esta /estado, que si pide token.
     res.json({
       ok: true,
       servicio:
@@ -95,22 +179,6 @@ app.get(
 
       timestamp:
         new Date().toISOString(),
-
-      sesionCargada:
-        !!sesion,
-
-      cantidadLeads:
-        sesion?.leads?.length ||
-        0,
-
-      cantidadAdmitidos:
-        sesion
-          ?.admitidosSalesforce
-          ?.length ||
-        0,
-
-      ultimaCarga:
-        ultimaCarga,
     });
   }
 );
@@ -121,6 +189,7 @@ app.get(
 
 app.post(
   "/cargar",
+  auth,
   async (req, res) => {
     if (cargaEnProceso) {
       return res.status(409).json({
@@ -265,6 +334,7 @@ app.post(
 
 app.get(
   "/resumen",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -342,6 +412,7 @@ app.get(
 
 app.get(
   "/admitidos",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -442,6 +513,7 @@ app.get(
 
 app.get(
   "/admitidos/diagnostico",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -602,6 +674,7 @@ app.get(
 
 app.get(
   "/admitidos/lista",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -672,6 +745,7 @@ app.get(
 
 app.get(
   "/admitidos/salesforce",
+  auth,
   async (req, res) => {
     try {
       const {
@@ -746,6 +820,7 @@ app.get(
 
 app.get(
   "/cohortes",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -775,6 +850,7 @@ app.get(
 
 app.get(
   "/leads",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -902,6 +978,7 @@ app.get(
 
 app.get(
   "/funnel",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -998,6 +1075,7 @@ app.get(
 
 app.get(
   "/debug/termino",
+  auth,
   (req, res) => {
     const valor =
       req.query.valor ||
@@ -1030,6 +1108,7 @@ app.get(
 
 app.get(
   "/debug/terminos-admitidos",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -1116,6 +1195,7 @@ app.get(
 
 app.get(
   "/debug/match-2027s1",
+  auth,
   (req, res) => {
     try {
       const data =
@@ -1189,6 +1269,7 @@ app.get(
 
 app.get(
   "/estado",
+  auth,
   (req, res) => {
     return ok(res, {
       sesionCargada:
@@ -1222,6 +1303,7 @@ app.get(
 
 app.post(
   "/reset",
+  auth,
   (req, res) => {
     sesion = null;
 
@@ -1291,6 +1373,7 @@ function terminoInfoSeguro(
 
 app.get(
   "/debug/apps-2027",
+  auth,
   async (req, res) => {
     try {
       const creds = await autenticar();
