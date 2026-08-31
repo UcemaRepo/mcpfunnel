@@ -168,6 +168,118 @@ export function terminoInfo(valor) {
   };
 }
 
+// ------------------------------------------------------------
+// CRITERIO DE ADMITIDO
+// ------------------------------------------------------------
+//
+// Estados que cuentan como admitido. Lista EXPLICITA a proposito.
+//
+// Antes se usaba LIKE '%Admi%' OR LIKE '%Admit%', que ademas de
+// los estados validos arrastraba:
+//
+//   - "Admit"                  -> vocabulario legacy (4.835 en
+//                                 2024, 80 en 2025). Ya no se usa.
+//   - "Admitido Revertido"     -> se le revirtio la admision
+//   - "Baja antes de admitido" -> nunca llego a ser admitido
+//
+// Si manana alguien crea un estado nuevo con la raiz "admi",
+// esta lista NO lo va a incluir sola: hay que agregarlo a mano.
+// Eso es intencional.
+//
+// El dashboard de Lightning cuenta solo "Admision". Si necesitas
+// que los numeros coincidan exactamente con el panel, deja
+// unicamente ese valor en la lista.
+// ------------------------------------------------------------
+
+export const ESTADOS_ADMITIDO = [
+  "Admision",
+  "Admision Condicional",
+  "Admitido",
+];
+
+export const ESTADOS_ADMITIDO_SOQL =
+  ESTADOS_ADMITIDO
+    .map((e) => `'${e}'`)
+    .join(", ");
+
+// ------------------------------------------------------------
+// COHORTE DE UNA APPLICATION
+// ------------------------------------------------------------
+//
+// Fuente de verdad: A_o_de_ingreso__c + Semestre__c.
+//
+// Por que NO se usan los otros campos de ano:
+//
+//   AnoLectivo__c  -> se desalinea. Hubo al menos un registro
+//                     con AnoLectivo 2026 mientras el resto de
+//                     sus campos decia 2027. Filtrar por aca
+//                     hacia perder registros reales.
+//
+//   hed__Term__c   -> vacio en el 100% de los registros.
+//
+//   Campana__c     -> es el ano de campana, no el de ingreso.
+//                     No siempre coincide.
+//
+// Devuelve el formato canonico del proyecto: "2027S1".
+// ------------------------------------------------------------
+
+export function cohorteDeApplication(app) {
+  if (!app) {
+    return "";
+  }
+
+  const ano =
+    app.A_o_de_ingreso__c ??
+    app.AnoLectivo__c;
+
+  if (ano === null || ano === undefined) {
+    return "";
+  }
+
+  const anoNum = Number(ano);
+
+  if (!Number.isFinite(anoNum)) {
+    return "";
+  }
+
+  const anoStr = String(Math.trunc(anoNum));
+
+  const sem = semestreNumero(app.Semestre__c);
+
+  return sem
+    ? `${anoStr}S${sem}`
+    : anoStr;
+}
+
+// "1er Semestre" -> "1"   |   "2do Semestre" -> "2"
+export function semestreNumero(valor) {
+  if (!valor) {
+    return null;
+  }
+
+  const t = String(valor)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (/(^|\D)1|1er|primer/.test(t)) {
+    return "1";
+  }
+
+  if (/(^|\D)2|2do|segund/.test(t)) {
+    return "2";
+  }
+
+  return null;
+}
+
+// "1" -> "1er Semestre"  (valor tal cual esta en Salesforce)
+export function semestreSoql(semestre) {
+  return String(semestre) === "2"
+    ? "2do Semestre"
+    : "1er Semestre";
+}
+
 export function terminosCompatibles(a, b) {
   const A = terminoInfo(a);
   const B = terminoInfo(b);
@@ -413,7 +525,11 @@ async function cargarApplicationsAdmitidas(sf) {
         hed__Application_Status__c,
         hed__Application_Date__c,
         AnoLectivo__c,
+        A_o_de_ingreso__c,
+        Semestre__c,
+        Tipo_de_Programa__c,
         Capita__c,
+        Beca_aplicada__c,
         hed__Term__r.Name,
         OwnerId,
         CreatedDate
@@ -421,31 +537,9 @@ async function cargarApplicationsAdmitidas(sf) {
       FROM hed__Application__c
 
       WHERE
-        (
-          hed__Application_Status__c LIKE '%Admi%'
-          OR
-          hed__Application_Status__c LIKE '%Admit%'
-        )
+        hed__Application_Status__c IN (${ESTADOS_ADMITIDO_SOQL})
 
-        AND
-        (
-          NOT hed__Term__r.Name LIKE '%Posgrado%'
-        )
-
-        AND
-        (
-          NOT hed__Term__r.Name LIKE '%Maestría%'
-        )
-
-        AND
-        (
-          NOT hed__Term__r.Name LIKE '%Executive%'
-        )
-
-        AND
-        (
-          NOT hed__Term__r.Name LIKE '%Septiembre%'
-        )
+        AND Tipo_de_Programa__c = 'Grado'
 
       ORDER BY CreatedDate DESC
     `);
@@ -469,11 +563,14 @@ async function cargarApplicationsAdmitidas(sf) {
       app.hed__Applicant__c ||
       "";
 
+    // Cohorte a partir de A_o_de_ingreso__c + Semestre__c.
+    //
+    // NO se usa AnoLectivo__c: es el campo que se desalinea
+    // (hubo al menos un caso con AnoLectivo 2026 y el resto
+    // de los campos en 2027). hed__Term__c está vacío en
+    // todos los registros, así que tampoco sirve.
     const termino =
-      normalizarTermino(
-        app.hed__Term__r?.Name ||
-        app.AnoLectivo__c
-      );
+      cohorteDeApplication(app);
 
     const personaKey =
       contactId ||
@@ -534,6 +631,31 @@ async function cargarApplicationsAdmitidas(sf) {
         anoLectivo:
           app.AnoLectivo__c ??
           null,
+
+        anoIngreso:
+          app.A_o_de_ingreso__c ??
+          null,
+
+        semestre:
+          app.Semestre__c ||
+          null,
+
+        tipoPrograma:
+          app.Tipo_de_Programa__c ||
+          null,
+
+        becaAplicada:
+          app.Beca_aplicada__c ??
+          null,
+
+        // Señal de datos inconsistentes: los dos años
+        // deberían coincidir. Si no, el registro está mal
+        // cargado en Salesforce.
+        aniosDesalineados:
+          app.AnoLectivo__c != null &&
+          app.A_o_de_ingreso__c != null &&
+          Number(app.AnoLectivo__c) !==
+            Number(app.A_o_de_ingreso__c),
 
         capita,
 
@@ -1382,14 +1504,17 @@ export async function buscarAdmitidos(
   const sf =
     crearCliente(creds);
 
+  // Estados explicitos, no comodines.
+  //
+  // LIKE '%Admi%' arrastraba 'Admit' (vocabulario legacy),
+  // 'Admitido Revertido' y 'Baja antes de admitido'.
   let whereClauses = [
-    `
-      (
-        hed__Application_Status__c LIKE '%Admi%'
-        OR
-        hed__Application_Status__c LIKE '%Admit%'
-      )
-    `,
+    `hed__Application_Status__c IN (${ESTADOS_ADMITIDO_SOQL})`,
+
+    // hed__Term__c está vacío en todos los registros, así que
+    // los filtros NOT hed__Term__r.Name LIKE '%Posgrado%' no
+    // filtraban nada. Este campo sí tiene datos.
+    `Tipo_de_Programa__c = 'Grado'`,
   ];
 
   if (
@@ -1413,28 +1538,21 @@ export async function buscarAdmitidos(
       // AnoLectivo + variantes del Term.
 
       whereClauses.push(
-        `
-          (
-            AnoLectivo__c = ${Number(
-              info.ano
-            )}
+        `A_o_de_ingreso__c = ${Number(
+          info.ano
+        )}`
+      );
 
-            OR
-            hed__Term__r.Name LIKE '${info.ano}SEM%'
-
-            OR
-            hed__Term__r.Name LIKE '${info.ano} SEM%'
-
-            OR
-            hed__Term__r.Name LIKE '${info.ano}S%'
-          )
-        `
+      whereClauses.push(
+        `Semestre__c = '${semestreSoql(
+          info.semestre
+        )}'`
       );
     } else if (
       info.ano
     ) {
       whereClauses.push(
-        `AnoLectivo__c = ${Number(
+        `A_o_de_ingreso__c = ${Number(
           info.ano
         )}`
       );
@@ -1451,7 +1569,7 @@ export async function buscarAdmitidos(
       )
     ) {
       whereClauses.push(
-        `AnoLectivo__c = ${anoNum}`
+        `A_o_de_ingreso__c = ${anoNum}`
       );
     }
   }
@@ -1501,41 +1619,10 @@ export async function buscarAdmitidos(
     );
   }
 
-  whereClauses.push(
-    `
-      (
-        NOT hed__Term__r.Name
-        LIKE '%Posgrado%'
-      )
-    `
-  );
-
-  whereClauses.push(
-    `
-      (
-        NOT hed__Term__r.Name
-        LIKE '%Maestría%'
-      )
-    `
-  );
-
-  whereClauses.push(
-    `
-      (
-        NOT hed__Term__r.Name
-        LIKE '%Executive%'
-      )
-    `
-  );
-
-  whereClauses.push(
-    `
-      (
-        NOT hed__Term__r.Name
-        LIKE '%Septiembre%'
-      )
-    `
-  );
+  // Los cuatro filtros NOT hed__Term__r.Name que había acá
+  // se eliminaron: el campo está vacío en el 100% de los
+  // registros, así que no excluían nada. La exclusión de
+  // posgrado ahora se hace arriba con Tipo_de_Programa__c.
 
   const limite =
     Math.min(
@@ -1559,7 +1646,11 @@ export async function buscarAdmitidos(
       hed__Application_Status__c,
       hed__Application_Date__c,
       AnoLectivo__c,
+      A_o_de_ingreso__c,
+      Semestre__c,
+      Tipo_de_Programa__c,
       Capita__c,
+      Beca_aplicada__c,
       hed__Term__r.Name,
       OwnerId
 
@@ -1621,6 +1712,28 @@ export async function buscarAdmitidos(
           r.AnoLectivo__c ??
           null,
 
+        anoIngreso:
+          r.A_o_de_ingreso__c ??
+          null,
+
+        semestre:
+          r.Semestre__c ||
+          null,
+
+        tipoPrograma:
+          r.Tipo_de_Programa__c ||
+          null,
+
+        becaAplicada:
+          r.Beca_aplicada__c ??
+          null,
+
+        aniosDesalineados:
+          r.AnoLectivo__c != null &&
+          r.A_o_de_ingreso__c != null &&
+          Number(r.AnoLectivo__c) !==
+            Number(r.A_o_de_ingreso__c),
+
         capita:
           Number(
             r.Capita__c ?? 0
@@ -1632,11 +1745,7 @@ export async function buscarAdmitidos(
           null,
 
         termino:
-          normalizarTermino(
-            r.hed__Term__r
-              ?.Name ||
-            r.AnoLectivo__c
-          ),
+          cohorteDeApplication(r),
       })
     );
 
