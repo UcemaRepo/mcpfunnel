@@ -192,9 +192,7 @@ export function terminoInfo(valor) {
 // ------------------------------------------------------------
 
 export const ESTADOS_ADMITIDO = [
-  "Admision",
-  "Admision Condicional",
-  "Admitido",
+  "Admision"
 ];
 
 export const ESTADOS_ADMITIDO_SOQL =
@@ -586,9 +584,9 @@ async function cargarApplicationsAdmitidas(sf) {
       }`;
 
     const capita =
-      Number(
-        app.Capita__c ?? 1
-      ) || 0;
+  Number(
+    app.Capita__c ?? 0
+  ) || 0;;
 
     const actual =
       unique.get(key);
