@@ -20,7 +20,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 // header porque auth() lo acepta de las dos formas.
 // ------------------------------------------------------------
 
-async function llamar(ruta, params = {}) {
+async function llamar(ruta, params = {}, metodo = "GET", cuerpo = null) {
   const puerto = process.env.PORT || 3000;
 
   const url = new URL(
@@ -34,9 +34,12 @@ async function llamar(ruta, params = {}) {
   }
 
   const res = await fetch(url, {
+    method: metodo,
     headers: {
+      "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.MCP_TOKEN}`,
     },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
 
   const texto = await res.text();
@@ -241,6 +244,88 @@ function crearServidor() {
       },
     },
     async (a) => salida(await llamar("/leads", a))
+  );
+
+  // ══════════════════════════════════════════════════════════
+  // PANELES
+  // ══════════════════════════════════════════════════════════
+  //
+  // El HTML se renderiza en un iframe sandbox de la extension,
+  // asi que puede traer estilos y JS propios (Chart.js ya esta
+  // cargado ahi). Es lo que hace que los paneles sean editables
+  // sin tocar la extension.
+  // ══════════════════════════════════════════════════════════
+
+  server.registerTool(
+    "enviar_panel",
+    {
+      title: "Enviar panel al dashboard",
+      description:
+        "Publica un panel en el dashboard embebido en Salesforce Lightning. Si ya existe un panel con esa clave lo REEMPLAZA; si no, lo crea. El html se renderiza en un iframe aislado que ya tiene Chart.js cargado y clases de estilo tipo Salesforce (tarjeta, tarjeta__titulo, encabezado, grilla grilla--3, metrica, metrica__valor, metrica__label, tabla). Usar SOLO cuando el usuario pide explicitamente enviar o actualizar un panel. El contenido debe ser exclusivamente metricas agregadas: el servidor rechaza cualquier panel con nombres, mails, telefonos o documentos.",
+      inputSchema: {
+        clave: z
+          .string()
+          .regex(/^[a-z0-9][a-z0-9-]{1,48}$/i)
+          .describe(
+            "Identificador estable del panel, ej. 'embudo-2027s1'. Reenviar la misma clave actualiza el panel existente."
+          ),
+
+        titulo: z
+          .string()
+          .optional()
+          .describe("Titulo que se ve en la solapa, ej. '2027 Semestre 1 | General'"),
+
+        html: z
+          .string()
+          .describe(
+            "HTML completo del panel. Puede incluir <style> y <script>. Para graficos usar <canvas> y Chart.js."
+          ),
+
+        orden: z
+          .number()
+          .optional()
+          .describe("Posicion entre las solapas. Menor va primero."),
+      },
+    },
+    async (a) =>
+      salida(await llamar("/paneles", {}, "POST", a))
+  );
+
+  server.registerTool(
+    "listar_paneles",
+    {
+      title: "Listar paneles publicados",
+      description:
+        "Devuelve las claves, titulos y fechas de los paneles publicados, sin el HTML. Usar antes de enviar un panel para saber si la clave ya existe y se va a sobreescribir.",
+      inputSchema: {},
+    },
+    async () => salida(await llamar("/paneles/indice"))
+  );
+
+  server.registerTool(
+    "borrar_panel",
+    {
+      title: "Borrar un panel",
+      description:
+        "Elimina un panel del dashboard. SOLO usar cuando el usuario lo pide de forma explicita e inequivoca.",
+      inputSchema: {
+        clave: z.string().describe("Clave del panel a borrar"),
+
+        confirmar: z
+          .literal("BORRAR")
+          .describe(
+            "Debe ser exactamente 'BORRAR'. Enviarlo solo si el usuario pidio explicitamente eliminar el panel."
+          ),
+      },
+    },
+    async (a) =>
+      salida(
+        await llamar(
+          `/paneles/${encodeURIComponent(a.clave)}`,
+          {},
+          "DELETE"
+        )
+      )
   );
 
   return server;
