@@ -239,11 +239,90 @@ function crearServidor() {
           .string()
           .optional()
           .describe(
-            "Estado del candidato: Nuevo, Contactado, Qualified, Desiste"
+            "Estado exacto. Valores reales: 'Nuevo', 'Contactado', 'Contactado Sin respuesta', 'Contactado Interesado', 'Negociando', 'Qualified', 'Unqualified', 'Desiste'. Buscar 'Contactado' tambien trae sus variantes; 'Qualified' NO trae 'Unqualified'."
+          ),
+
+        limite: z
+          .number()
+          .min(1)
+          .max(1000)
+          .optional()
+          .describe("Registros por pagina. Default 200, tope 1000."),
+
+        offset: z
+          .number()
+          .min(0)
+          .optional()
+          .describe(
+            "Desde que registro arrancar. La respuesta trae 'siguienteOffset' para pedir la pagina siguiente."
           ),
       },
     },
     async (a) => salida(await llamar("/leads", a))
+  );
+
+  // ── agregados ─────────────────────────────────────────────
+  server.registerTool(
+    "agregados",
+    {
+      title: "Conteos agregados",
+      description:
+        "Devuelve conteos de leads agrupados por una o dos dimensiones, calculados en el servidor. USAR ESTA en lugar de 'buscar_leads' para cualquier panel, grafico o pregunta de volumen: devuelve unos pocos KB en vez de traerse decenas de miles de registros individuales. 'buscar_leads' es solo para inspeccionar casos concretos.",
+      inputSchema: {
+        por: z
+          .enum([
+            "mes",
+            "cohorte",
+            "estado",
+            "canal",
+            "origen",
+            "asesor",
+            "colegio",
+            "semestre",
+            "beca",
+            "gestionado",
+            "programa",
+          ])
+          .describe("Dimension principal de agrupacion."),
+
+        sub: z
+          .enum([
+            "mes",
+            "cohorte",
+            "estado",
+            "canal",
+            "origen",
+            "asesor",
+            "colegio",
+            "semestre",
+            "beca",
+            "gestionado",
+            "programa",
+          ])
+          .optional()
+          .describe(
+            "Segunda dimension. Con esto sale una matriz (ej. por='mes', sub='canal') lista para barras apiladas o lineas multiples."
+          ),
+
+        topN: z
+          .number()
+          .min(1)
+          .max(50)
+          .optional()
+          .describe(
+            "Deja las N categorias mas grandes y agrupa el resto en 'otros', sin perder el total."
+          ),
+
+        ...filtroCohorte,
+
+        estado: z.string().optional(),
+        programa: z.string().optional(),
+        asesor: z.string().optional(),
+        canal: z.string().optional(),
+        origen: z.string().optional(),
+      },
+    },
+    async (a) => salida(await llamar("/agregados", a))
   );
 
   // ══════════════════════════════════════════════════════════
