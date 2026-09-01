@@ -21,6 +21,7 @@ import {
 } from "./transform.js";
 
 import { montarMcp } from "./mcp.js";
+import { montarPaneles } from "./paneles.js";
 
 const app = express();
 
@@ -1484,6 +1485,7 @@ app.get(
 //     https://<tu-app>.onrender.com/mcp?k=<MCP_TOKEN>
 // ============================================================
 
+montarPaneles(app, auth);
 montarMcp(app, auth);
 
 app.use(
