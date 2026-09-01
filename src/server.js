@@ -18,10 +18,12 @@ import {
 import {
   contarEmbudo,
   tasas,
+  coincideEstado,
 } from "./transform.js";
 
 import { montarMcp } from "./mcp.js";
 import { montarPaneles } from "./paneles.js";
+import { montarAgregados } from "./agregados.js";
 
 const app = express();
 
@@ -942,28 +944,82 @@ app.get(
       if (
         estado
       ) {
-        const e =
-          String(
-            estado
-          ).toLowerCase();
-
+        // Comparacion exacta o por prefijo de palabra.
+        // Con .includes(), buscar "Qualified" tambien traia
+        // "Unqualified", que es el estado opuesto.
         leads =
           leads.filter(
             (l) =>
-              String(
-                l.estado ||
-                ""
+              coincideEstado(
+                l.estado,
+                estado
               )
-                .toLowerCase()
-                .includes(e)
           );
       }
 
-      return ok(res, {
-        total:
-          leads.length,
+      // ------------------------------------------------------
+      // Paginado
+      // ------------------------------------------------------
+      //
+      // Sin tope, una cohorte cerrada de decenas de miles de
+      // leads generaba una respuesta de varias decenas de MB.
+      // Serializar eso agota la memoria del free tier de Render
+      // y el proceso se reinicia.
+      //
+      // Para conteos NO usar esta ruta: /agregados devuelve lo
+      // mismo ya calculado, en unos pocos KB.
+      // ------------------------------------------------------
 
-        leads,
+      const total =
+        leads.length;
+
+      const limite =
+        Math.min(
+          Math.max(
+            parseInt(
+              req.query.limite,
+              10
+            ) || 200,
+            1
+          ),
+          1000
+        );
+
+      const offset =
+        Math.max(
+          parseInt(
+            req.query.offset,
+            10
+          ) || 0,
+          0
+        );
+
+      const pagina =
+        leads.slice(
+          offset,
+          offset + limite
+        );
+
+      return ok(res, {
+        total,
+        offset,
+        limite,
+        mostrando:
+          pagina.length,
+
+        hayMas:
+          offset +
+            pagina.length <
+          total,
+
+        siguienteOffset:
+          offset +
+            pagina.length <
+          total
+            ? offset + pagina.length
+            : null,
+
+        leads: pagina,
       });
     } catch (error) {
       return errorResponse(
@@ -1485,6 +1541,72 @@ app.get(
 //     https://<tu-app>.onrender.com/mcp?k=<MCP_TOKEN>
 // ============================================================
 
+// ------------------------------------------------------------
+// Filtro de leads compartido por /agregados
+// ------------------------------------------------------------
+// Misma semantica que /leads, en un solo lugar para que no se
+// desincronicen los dos caminos.
+// ------------------------------------------------------------
+
+function filtrarLeads(leads, f = {}) {
+  let out = leads;
+
+  const cohorte = f.termino || f.term;
+  const anio = f.ano || f.year;
+
+  if (cohorte) {
+    const buscado = normalizarTermino(cohorte);
+    out = out.filter(
+      (l) =>
+        normalizarTermino(
+          l.cohorte || l.cuandoIngresaria || l.termino
+        ) === buscado
+    );
+  } else if (anio) {
+    const buscado = String(anio);
+    out = out.filter((l) =>
+      String(
+        l.cohorte || l.cuandoIngresaria || l.termino || ""
+      ).startsWith(buscado)
+    );
+  }
+
+  if (f.programa) {
+    const p = String(f.programa).toLowerCase();
+    out = out.filter((l) =>
+      String(l.programa || "").toLowerCase().includes(p)
+    );
+  }
+
+  if (f.estado) {
+    out = out.filter((l) => coincideEstado(l.estado, f.estado));
+  }
+
+  if (f.asesor) {
+    const a = String(f.asesor).toLowerCase();
+    out = out.filter((l) =>
+      String(l.asesor || "").toLowerCase().includes(a)
+    );
+  }
+
+  if (f.canal) {
+    const c = String(f.canal).toLowerCase();
+    out = out.filter((l) =>
+      String(l.canal || "").toLowerCase().includes(c)
+    );
+  }
+
+  if (f.origen) {
+    const o = String(f.origen).toLowerCase();
+    out = out.filter((l) =>
+      String(l.origen || "").toLowerCase().includes(o)
+    );
+  }
+
+  return out;
+}
+
+montarAgregados(app, auth, getSesion, filtrarLeads);
 montarPaneles(app, auth);
 montarMcp(app, auth);
 
