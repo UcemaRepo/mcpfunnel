@@ -24,6 +24,7 @@ import {
 import { montarMcp } from "./mcp.js";
 import { montarPaneles } from "./paneles.js";
 import { montarAgregados } from "./agregados.js";
+import { montarPersona } from "./persona.js";
 
 const app = express();
 
@@ -1607,6 +1608,7 @@ function filtrarLeads(leads, f = {}) {
 }
 
 montarAgregados(app, auth, getSesion, filtrarLeads);
+montarPersona(app, auth);
 montarPaneles(app, auth);
 montarMcp(app, auth);
 
