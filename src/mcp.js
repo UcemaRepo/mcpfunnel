@@ -325,6 +325,32 @@ function crearServidor() {
     async (a) => salida(await llamar("/agregados", a))
   );
 
+  // ── buscar_persona ────────────────────────────────────────
+  server.registerTool(
+    "buscar_persona",
+    {
+      title: "Ficha completa de una persona",
+      description:
+        "Busca a una persona en TODOS sus registros de Salesforce en vivo, sin los filtros de la sesion en memoria: incluye posgrado (maestrias, especializaciones, doctorados) y formularios sin semestre, que no forman parte del dataset de las demas herramientas. Devuelve sus formularios y solicitudes clasificados en grado/posgrado, y marca si cruza ambos. Usar para preguntas sobre una persona concreta; NUNCA para volumenes.",
+      inputSchema: {
+        apellido: z
+          .string()
+          .optional()
+          .describe(
+            "Apellido o parte. Es el criterio mas confiable: los nombres suelen tener variantes de tipeo."
+          ),
+
+        nombre: z.string().optional().describe("Nombre o parte."),
+
+        dni: z
+          .string()
+          .optional()
+          .describe("Numero de documento, solo digitos. El criterio mas preciso."),
+      },
+    },
+    async (a) => salida(await llamar("/persona", a))
+  );
+
   // ══════════════════════════════════════════════════════════
   // PANELES
   // ══════════════════════════════════════════════════════════
