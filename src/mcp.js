@@ -366,13 +366,13 @@ function crearServidor() {
     {
       title: "Enviar panel al dashboard",
       description:
-        "Publica un panel en el dashboard embebido en Salesforce Lightning. Si ya existe un panel con esa clave lo REEMPLAZA; si no, lo crea. El html se renderiza en un iframe aislado que ya tiene Chart.js cargado y clases de estilo tipo Salesforce (tarjeta, tarjeta__titulo, encabezado, grilla grilla--3, metrica, metrica__valor, metrica__label, tabla). Usar SOLO cuando el usuario pide explicitamente enviar o actualizar un panel. El contenido debe ser exclusivamente metricas agregadas: el servidor rechaza cualquier panel con nombres, mails, telefonos o documentos.",
+        "Publica un panel en el dashboard embebido en Salesforce Lightning. Si ya existe un panel con esa clave lo REEMPLAZA; si no, lo crea. ANTES de usar esta herramienta llamar a \'listar_paneles\': muestra las claves ya existentes, incluidas las que solo estan guardadas en el navegador del usuario. Si el pedido es modificar o fusionar algo que ya existe, hay que reusar esa clave. El html se renderiza en un iframe aislado que ya tiene Chart.js cargado y clases de estilo tipo Salesforce (tarjeta, tarjeta__titulo, encabezado, grilla grilla--3, metrica, metrica__valor, metrica__label, tabla). Usar SOLO cuando el usuario pide explicitamente enviar o actualizar un panel. El contenido debe ser exclusivamente metricas agregadas: el servidor rechaza cualquier panel con nombres, mails, telefonos o documentos.",
       inputSchema: {
         clave: z
           .string()
           .regex(/^[a-z0-9][a-z0-9-]{1,48}$/i)
           .describe(
-            "Identificador estable del panel, ej. 'embudo-2027s1'. Reenviar la misma clave actualiza el panel existente."
+            "Identificador estable del panel. Para MODIFICAR, ACTUALIZAR o FUSIONAR un panel existente hay que reenviar SU MISMA CLAVE: eso lo reemplaza en el dashboard. Usar una clave nueva crea un panel adicional, que casi nunca es lo que se pide. Llamar primero a 'listar_paneles' para ver las claves que ya existen."
           ),
 
         titulo: z
@@ -401,10 +401,26 @@ function crearServidor() {
     {
       title: "Listar paneles publicados",
       description:
-        "Devuelve las claves, titulos y fechas de los paneles publicados, sin el HTML. Usar antes de enviar un panel para saber si la clave ya existe y se va a sobreescribir.",
+        "Devuelve las claves, titulos y fechas de TODOS los paneles conocidos, sin el HTML: los que estan en el servidor y tambien los que solo quedaron guardados en el navegador del usuario de una sesion anterior (origen: \'addon\'). USAR SIEMPRE antes de enviar un panel: es la unica forma de saber que claves ya existen y evitar crear un duplicado cuando lo que se pide es modificar.",
       inputSchema: {},
     },
     async () => salida(await llamar("/paneles/indice"))
+  );
+
+  server.registerTool(
+    "ver_panel",
+    {
+      title: "Ver el contenido de un panel",
+      description:
+        "Devuelve el HTML completo de un panel publicado. Usar antes de modificarlo o fusionarlo, para partir de lo que ya tiene en vez de rehacerlo de cero. Si el servidor se reinicio, el HTML puede no estar disponible aunque el panel siga visible en el navegador del usuario.",
+      inputSchema: {
+        clave: z.string().describe("Clave del panel"),
+      },
+    },
+    async (a) =>
+      salida(
+        await llamar(`/paneles/${encodeURIComponent(a.clave)}`)
+      )
   );
 
   server.registerTool(
@@ -412,7 +428,7 @@ function crearServidor() {
     {
       title: "Borrar un panel",
       description:
-        "Elimina un panel del dashboard. SOLO usar cuando el usuario lo pide de forma explicita e inequivoca.",
+        "Elimina un panel del dashboard, tanto del servidor como de la copia guardada en el navegador del usuario. El borrado local se aplica cuando la extension sincroniza (al abrir el panel o tocar Actualizar). SOLO usar cuando el usuario lo pide de forma explicita e inequivoca.",
       inputSchema: {
         clave: z.string().describe("Clave del panel a borrar"),
 
