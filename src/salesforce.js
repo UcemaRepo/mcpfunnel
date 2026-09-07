@@ -192,7 +192,9 @@ export function terminoInfo(valor) {
 // ------------------------------------------------------------
 
 export const ESTADOS_ADMITIDO = [
-  "Admision"
+  "Admision",
+  "Admision Condicional",
+  "Admitido",
 ];
 
 export const ESTADOS_ADMITIDO_SOQL =
@@ -584,9 +586,9 @@ async function cargarApplicationsAdmitidas(sf) {
       }`;
 
     const capita =
-  Number(
-    app.Capita__c ?? 0
-  ) || 0;;
+      Number(
+        app.Capita__c ?? 1
+      ) || 0;
 
     const actual =
       unique.get(key);
@@ -799,7 +801,11 @@ export async function cargarLeads(
           SELECT
             LeadId,
             Status,
-            Campaign.Name
+            Campaign.Name,
+            Motivo_desiste__c,
+            Otros_motivos__c,
+            Eligio_otra_Universidad_descripcion__c,
+            Codigo_programa__c
 
           FROM CampaignMember
 
@@ -839,7 +845,34 @@ export async function cargarLeads(
         cmMap[lid] = {
           best: "",
           camps: new Set(),
+
+          // El motivo de desiste vive en CampaignMember, no en
+          // Formulario_web__c ni en Lead.Status. Es por campaña:
+          // alguien puede desistir de una carrera y seguir en
+          // otra, cada una con su motivo.
+          motivos: new Map(),
         };
+      }
+
+      // Solo se guarda el motivo de las membresías que
+      // efectivamente desistieron. En las demás el campo suele
+      // venir cargado de arrastre y no significa nada.
+      if (
+        (r.Status || "").toLowerCase() === "desiste" &&
+        r.Motivo_desiste__c
+      ) {
+        cmMap[lid].motivos.set(
+          r.Codigo_programa__c ||
+            r.Campaign?.Name ||
+            "sin_programa",
+          {
+            motivo: r.Motivo_desiste__c,
+            detalle:
+              r.Eligio_otra_Universidad_descripcion__c ||
+              r.Otros_motivos__c ||
+              null,
+          }
+        );
       }
 
       const camp =
@@ -1257,6 +1290,9 @@ export async function cargarLeads(
 
               admitido:
                 esAdmitido,
+
+              motivos:
+                cm.motivos,
             },
 
             {
