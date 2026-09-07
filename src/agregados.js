@@ -27,6 +27,27 @@ const DIMENSIONES = {
   colegio: (l) => l.colegio || "sin_colegio",
   semestre: (l) => l.semestre || "sin_semestre",
   beca: (l) => l.beca || "sin_dato",
+
+  // Solo tiene sentido sobre leads que desistieron. En el resto
+  // devuelve "sin_motivo", que en un agregado sin filtrar es la
+  // categoria dominante y no dice nada: conviene combinarlo con
+  // estado='Desiste'.
+  motivoDesiste: (l) => l.motivoDesiste || "sin_motivo",
+
+  // Agrupa los motivos en dos familias. "Sin respuesta", "No
+  // quiso informacion" y "Datos incorrectos" no explican por que
+  // alguien no eligio UCEMA: explican que la conversacion nunca
+  // paso. Mezclarlos con Precio o Modalidad distorsiona
+  // cualquier lectura.
+  tipoDesiste: (l) => {
+    if (!l.motivoDesiste) return "sin_motivo";
+
+    const m = String(l.motivoDesiste).toLowerCase();
+
+    return /sin respuesta|no quiso|datos incorrectos|no hubo respuesta/.test(m)
+      ? "no_contactabilidad"
+      : "motivo_real";
+  },
   gestionado: (l) => l.gestionado || "sin_dato",
 
   // Multivaluado: un lead con "INIA, LIEM" cuenta en ambos.
