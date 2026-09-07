@@ -151,6 +151,26 @@ export function transformar(r, extras, opts = {}) {
     estado:    extras.estado,
     estadoPri: estadoPri(extras.estado),
 
+    // ── MOTIVO DE DESISTE ──
+    //
+    // Vive en CampaignMember, por campaña. Una persona puede
+    // desistir de una carrera y seguir activa en otra, así que
+    // se guardan todos y además el principal.
+    //
+    // Ojo al interpretarlo: el motivo lo carga el asesor, no el
+    // prospecto. "Sin respuesta", "No quiso información" y
+    // "Datos incorrectos" no son motivos de rechazo, son fallas
+    // de contactabilidad — conviene separarlos al analizar.
+    motivoDesiste:
+      extras.motivos && extras.motivos.size
+        ? [...extras.motivos.values()][0].motivo
+        : null,
+
+    motivosPorPrograma:
+      extras.motivos && extras.motivos.size
+        ? Object.fromEntries(extras.motivos)
+        : null,
+
     // ── EL DATO QUE ANTES SE PERDÍA ──
     // Admitido__c se consultaba en Contact pero se descartaba:
     // solo servía para decidir a quién pedirle el Feedback.
