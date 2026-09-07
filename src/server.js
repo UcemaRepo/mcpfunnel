@@ -869,6 +869,7 @@ app.get(
         year,
         programa,
         estado,
+        motivoDesiste,
       } = req.query;
 
       let leads =
@@ -955,6 +956,25 @@ app.get(
                 l.estado,
                 estado
               )
+          );
+      }
+
+      if (
+        motivoDesiste
+      ) {
+        const m =
+          String(motivoDesiste)
+            .toLowerCase();
+
+        leads =
+          leads.filter(
+            (l) =>
+              String(
+                l.motivoDesiste ||
+                ""
+              )
+                .toLowerCase()
+                .includes(m)
           );
       }
 
@@ -1601,6 +1621,13 @@ function filtrarLeads(leads, f = {}) {
     const o = String(f.origen).toLowerCase();
     out = out.filter((l) =>
       String(l.origen || "").toLowerCase().includes(o)
+    );
+  }
+
+  if (f.motivoDesiste) {
+    const m = String(f.motivoDesiste).toLowerCase();
+    out = out.filter((l) =>
+      String(l.motivoDesiste || "").toLowerCase().includes(m)
     );
   }
 
