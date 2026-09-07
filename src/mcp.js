@@ -242,6 +242,13 @@ function crearServidor() {
             "Estado exacto. Valores reales: 'Nuevo', 'Contactado', 'Contactado Sin respuesta', 'Contactado Interesado', 'Negociando', 'Qualified', 'Unqualified', 'Desiste'. Buscar 'Contactado' tambien trae sus variantes; 'Qualified' NO trae 'Unqualified'."
           ),
 
+        motivoDesiste: z
+          .string()
+          .optional()
+          .describe(
+            "Motivo de desiste exacto: Precio, Modalidad, Horarios, Distancia, Plan de estudios, Eligio otra carrera, Eligio otra Universidad, Sin respuesta, No quiso informacion, Datos incorrectos, Otros."
+          ),
+
         limite: z
           .number()
           .min(1)
@@ -267,7 +274,7 @@ function crearServidor() {
     {
       title: "Conteos agregados",
       description:
-        "Devuelve conteos de leads agrupados por una o dos dimensiones, calculados en el servidor. USAR ESTA en lugar de 'buscar_leads' para cualquier panel, grafico o pregunta de volumen: devuelve unos pocos KB en vez de traerse decenas de miles de registros individuales. 'buscar_leads' es solo para inspeccionar casos concretos.",
+        "Devuelve conteos de leads agrupados por una o dos dimensiones, calculados en el servidor. USAR ESTA en lugar de 'buscar_leads' para cualquier panel, grafico o pregunta de volumen: devuelve unos pocos KB en vez de traerse decenas de miles de registros individuales. 'buscar_leads' es solo para inspeccionar casos concretos. Para motivos de desiste combinar por='motivoDesiste' con estado='Desiste'; sin ese filtro la categoria 'sin_motivo' domina y no dice nada. La dimension 'tipoDesiste' separa los motivos reales (Precio, Modalidad, Horarios) de las fallas de contactabilidad (Sin respuesta, No quiso informacion, Datos incorrectos), que no explican por que alguien no eligio la universidad.",
       inputSchema: {
         por: z
           .enum([
@@ -282,6 +289,8 @@ function crearServidor() {
             "beca",
             "gestionado",
             "programa",
+            "motivoDesiste",
+            "tipoDesiste",
           ])
           .describe("Dimension principal de agrupacion."),
 
@@ -298,6 +307,8 @@ function crearServidor() {
             "beca",
             "gestionado",
             "programa",
+            "motivoDesiste",
+            "tipoDesiste",
           ])
           .optional()
           .describe(
@@ -320,6 +331,7 @@ function crearServidor() {
         asesor: z.string().optional(),
         canal: z.string().optional(),
         origen: z.string().optional(),
+        motivoDesiste: z.string().optional(),
       },
     },
     async (a) => salida(await llamar("/agregados", a))
