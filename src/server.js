@@ -25,6 +25,7 @@ import { montarMcp } from "./mcp.js";
 import { montarPaneles } from "./paneles.js";
 import { montarAgregados } from "./agregados.js";
 import { montarPersona } from "./persona.js";
+import { admitidosPorMes } from "./admitidos-por-mes.js";
 
 const app = express();
 
@@ -492,6 +493,38 @@ app.get(
         error,
         400
       );
+    }
+  }
+);
+
+// ============================================================
+// ADMITIDOS POR MES
+// ============================================================
+//
+// /admitidos/por-mes?termino=2027S1
+//
+// Cuenta los admitidos de la cohorte por mes (decisión,
+// solicitud o creación de la Application, la mejor que haya).
+// Sólo conteos, sin datos personales. La usa Tech&Grow para
+// comparar campañas al mismo punto y proyectar.
+// ============================================================
+
+app.get(
+  "/admitidos/por-mes",
+  auth,
+  (req, res) => {
+    try {
+      const { termino, term, ano, year, campoFecha } = req.query;
+      return ok(
+        res,
+        admitidosPorMes(getSesion(), {
+          termino: termino || term,
+          ano: ano || year,
+          campoFecha,
+        })
+      );
+    } catch (error) {
+      return errorResponse(res, error, 400);
     }
   }
 );
