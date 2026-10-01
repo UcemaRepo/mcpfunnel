@@ -628,6 +628,19 @@ async function cargarApplicationsAdmitidas(sf) {
           app.hed__Application_Date__c ||
           null,
 
+        // Para admitidos-por-mes: si no hay fecha de solicitud,
+        // se usa la creación de la Application.
+        fechaCreacion:
+          app.CreatedDate ||
+          null,
+
+        // Fecha de la decisión de admisión. Sólo tiene valor si
+        // agregás hed__Application_Decision_Date__c al SELECT de
+        // cargarApplicationsAdmitidas (ver README).
+        fechaDecision:
+          app.hed__Application_Decision_Date__c ||
+          null,
+
         anoLectivo:
           app.AnoLectivo__c ??
           null,
