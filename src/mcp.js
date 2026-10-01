@@ -169,6 +169,25 @@ function crearServidor() {
     async (a) => salida(await llamar("/admitidos/lista", a))
   );
 
+  // ── admitidos_por_mes ─────────────────────────────────────
+  server.registerTool(
+    "admitidos_por_mes",
+    {
+      title: "Admitidos por mes",
+      description:
+        "Admitidos de una cohorte contados por mes (fecha de decisión, de solicitud o de creación de la Application, la mejor disponible), con acumulado. Sin datos personales. Usar para comparar campañas al mismo punto del año y para proyectar.",
+      inputSchema: {
+        ...filtroCohorte,
+
+        campoFecha: z
+          .enum(["fechaDecision", "fechaSolicitud", "fechaCreacion"])
+          .optional()
+          .describe("Forzar qué fecha usar. Por defecto se elige sola."),
+      },
+    },
+    async (a) => salida(await llamar("/admitidos/por-mes", a))
+  );
+
   // ── admitidos_salesforce ──────────────────────────────────
   server.registerTool(
     "admitidos_salesforce",
