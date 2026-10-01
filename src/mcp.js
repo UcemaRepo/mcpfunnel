@@ -68,14 +68,14 @@ const salida = (obj) => ({
 const filtroCohorte = {
   termino: z
     .string()
-    .optional()
+    .nullish()
     .describe(
       "Cohorte: '2027S1', '2027SEM1' o '2026S2'. Es el filtro preferido."
     ),
 
   ano: z
     .string()
-    .optional()
+    .nullish()
     .describe(
       "Año de ingreso, ej. '2027'. Menos preciso que termino: incluye ambos semestres."
     ),
@@ -127,22 +127,22 @@ function crearServidor() {
 
         capita_min: z
           .string()
-          .optional()
+          .nullish()
           .describe("Cápita mínima, ej. '0.5'"),
 
         capita_max: z
           .string()
-          .optional()
+          .nullish()
           .describe("Cápita máxima, ej. '1'"),
 
         nombre: z
           .string()
-          .optional()
+          .nullish()
           .describe("Filtra por nombre o parte del nombre del alumno"),
 
         incluirDetalle: z
           .boolean()
-          .optional()
+          .nullish()
           .describe(
             "true devuelve también los registros individuales. Default false."
           ),
@@ -181,7 +181,7 @@ function crearServidor() {
 
         campoFecha: z
           .enum(["fechaDecision", "fechaSolicitud", "fechaCreacion"])
-          .optional()
+          .nullish()
           .describe("Forzar qué fecha usar. Por defecto se elige sola."),
       },
     },
@@ -198,18 +198,18 @@ function crearServidor() {
       inputSchema: {
         ...filtroCohorte,
 
-        nombre: z.string().optional(),
-        capita_min: z.string().optional(),
-        capita_max: z.string().optional(),
+        nombre: z.string().nullish(),
+        capita_min: z.string().nullish(),
+        capita_max: z.string().nullish(),
 
         limite: z
           .number()
           .min(1)
           .max(500)
-          .optional()
+          .nullish()
           .describe("Máximo de registros. Default 200."),
 
-        offset: z.number().min(0).optional(),
+        offset: z.number().min(0).nullish(),
       },
     },
     async (a) => salida(await llamar("/admitidos/salesforce", a))
@@ -251,19 +251,19 @@ function crearServidor() {
 
         programa: z
           .string()
-          .optional()
+          .nullish()
           .describe("Sigla o nombre del programa, ej. INIA, LIEM"),
 
         estado: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "Estado exacto. Valores reales: 'Nuevo', 'Contactado', 'Contactado Sin respuesta', 'Contactado Interesado', 'Negociando', 'Qualified', 'Unqualified', 'Desiste'. Buscar 'Contactado' tambien trae sus variantes; 'Qualified' NO trae 'Unqualified'."
           ),
 
         motivoDesiste: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "Motivo de desiste exacto: Precio, Modalidad, Horarios, Distancia, Plan de estudios, Eligio otra carrera, Eligio otra Universidad, Sin respuesta, No quiso informacion, Datos incorrectos, Otros."
           ),
@@ -272,13 +272,13 @@ function crearServidor() {
           .number()
           .min(1)
           .max(1000)
-          .optional()
+          .nullish()
           .describe("Registros por pagina. Default 200, tope 1000."),
 
         offset: z
           .number()
           .min(0)
-          .optional()
+          .nullish()
           .describe(
             "Desde que registro arrancar. La respuesta trae 'siguienteOffset' para pedir la pagina siguiente."
           ),
@@ -329,7 +329,7 @@ function crearServidor() {
             "motivoDesiste",
             "tipoDesiste",
           ])
-          .optional()
+          .nullish()
           .describe(
             "Segunda dimension. Con esto sale una matriz (ej. por='mes', sub='canal') lista para barras apiladas o lineas multiples."
           ),
@@ -338,19 +338,19 @@ function crearServidor() {
           .number()
           .min(1)
           .max(50)
-          .optional()
+          .nullish()
           .describe(
             "Deja las N categorias mas grandes y agrupa el resto en 'otros', sin perder el total."
           ),
 
         ...filtroCohorte,
 
-        estado: z.string().optional(),
-        programa: z.string().optional(),
-        asesor: z.string().optional(),
-        canal: z.string().optional(),
-        origen: z.string().optional(),
-        motivoDesiste: z.string().optional(),
+        estado: z.string().nullish(),
+        programa: z.string().nullish(),
+        asesor: z.string().nullish(),
+        canal: z.string().nullish(),
+        origen: z.string().nullish(),
+        motivoDesiste: z.string().nullish(),
       },
     },
     async (a) => salida(await llamar("/agregados", a))
@@ -366,16 +366,16 @@ function crearServidor() {
       inputSchema: {
         apellido: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "Apellido o parte. Es el criterio mas confiable: los nombres suelen tener variantes de tipeo."
           ),
 
-        nombre: z.string().optional().describe("Nombre o parte."),
+        nombre: z.string().nullish().describe("Nombre o parte."),
 
         dni: z
           .string()
-          .optional()
+          .nullish()
           .describe("Numero de documento, solo digitos. El criterio mas preciso."),
       },
     },
@@ -408,7 +408,7 @@ function crearServidor() {
 
         titulo: z
           .string()
-          .optional()
+          .nullish()
           .describe("Titulo que se ve en la solapa, ej. '2027 Semestre 1 | General'"),
 
         html: z
@@ -419,7 +419,7 @@ function crearServidor() {
 
         orden: z
           .number()
-          .optional()
+          .nullish()
           .describe("Posicion entre las solapas. Menor va primero."),
       },
     },
