@@ -26,6 +26,7 @@ import { montarPaneles } from "./paneles.js";
 import { montarAgregados } from "./agregados.js";
 import { montarPersona } from "./persona.js";
 import { admitidosPorMes } from "./admitidos-por-mes.js";
+import { iniciarKeepAlive } from "./keepalive.js";
 
 const app = express();
 
@@ -1741,5 +1742,7 @@ app.listen(
     console.log(
       "=========================================="
     );
+
+    iniciarKeepAlive();
   }
 );

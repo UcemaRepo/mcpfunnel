@@ -33,6 +33,8 @@ se van con él. Esa es la garantía de efimeridad — no depende de un TTL.
 | `SF_CLIENT_SECRET` | consumer secret |
 | `MCP_TOKEN` | `openssl rand -hex 32` |
 | `ENMASCARAR_PII` | `true` (poné `false` solo si necesitás el dato completo) |
+| `KEEPALIVE` | opcional: `false` desactiva el auto-ping (ver Limitaciones) |
+| `KEEPALIVE_MINUTOS` | opcional: intervalo del auto-ping, default `4` |
 
 ---
 
@@ -87,9 +89,11 @@ URL: `https://TU-APP.onrender.com/mcp?k=TU_TOKEN`
 
 **Cold start.** En el free tier, tras ~15 min sin tráfico Render apaga el
 servicio. La siguiente request lo despierta (~50 s) **y la sesión se perdió**.
-Si molesta: plan pago, o un cron que le pegue a `/health` cada 10 min (aunque
-eso mantiene los datos vivos en RAM indefinidamente, que es justo lo que no
-querías).
+Para evitarlo, el servidor se pingea solo cada 4 min a `/` usando la URL
+pública (`RENDER_EXTERNAL_URL`, que define Render; ver `src/keepalive.js`).
+Ojo: eso mantiene los datos vivos en RAM indefinidamente; usá `/purgar` cuando
+no los necesites, o `KEEPALIVE=false` para volver al comportamiento anterior.
+Un servicio prendido 24/7 consume ~744 de las 750 h/mes gratis del workspace.
 
 **Token en la URL.** La UI de conectores de Claude no permite headers
 arbitrarios. El token en query param es más débil que un header: queda en la
