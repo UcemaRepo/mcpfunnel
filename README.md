@@ -69,6 +69,15 @@ npx @modelcontextprotocol/inspector
 
 ---
 
+## Conciliación (Salesforce vs. sesión)
+
+`GET /conciliacion?desde=2026-01-01` compara los leads que hay ahora en
+Salesforce contra los cargados en la sesión (requiere `/cargar` antes).
+En Windows: `scripts\conciliacion.bat [AAAA-MM-DD] [resumen]`. Pide el token
+o lo toma de la variable `MCP_TOKEN`; guarda la respuesta en un `.json`.
+
+---
+
 ## Conectar a Claude
 
 `claude.ai → Customize → Connectors → + → Add custom connector`

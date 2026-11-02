@@ -209,7 +209,7 @@ export async function traerFormulariosSalesforce({ desde, todosLosAsesores } = {
   const filtroOwner = todosLosAsesores ? "" : `AND OwnerId IN (${ownerIn})`;
 
   return sf.queryAll(`
-    SELECT Id, Nombres__c, Apellidos__c, CreatedDate
+    SELECT Id, Nombres__c, Apellidos__c, CreatedDate, LastModifiedDate
     FROM Formulario_web__c
     WHERE CreatedDate >= ${desde || "2025-01-01T00:00:00Z"}
     ${filtroOwner}
