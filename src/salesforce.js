@@ -202,6 +202,21 @@ export const ESTADOS_ADMITIDO_SOQL =
     .map((e) => `'${e}'`)
     .join(", ");
 
+export async function traerFormulariosSalesforce({ desde, todosLosAsesores } = {}) {
+  const sf = crearCliente(await autenticar());
+
+  const ownerIn = ASESOR_IDS.map((i) => `'${i}'`).join(",");
+  const filtroOwner = todosLosAsesores ? "" : `AND OwnerId IN (${ownerIn})`;
+
+  return sf.queryAll(`
+    SELECT Id, Nombres__c, Apellidos__c, CreatedDate
+    FROM Formulario_web__c
+    WHERE CreatedDate >= ${desde || "2025-01-01T00:00:00Z"}
+    ${filtroOwner}
+    ORDER BY CreatedDate DESC
+  `);
+}
+
 // ------------------------------------------------------------
 // COHORTE DE UNA APPLICATION
 // ------------------------------------------------------------
