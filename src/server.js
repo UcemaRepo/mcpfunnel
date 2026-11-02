@@ -27,6 +27,9 @@ import { montarAgregados } from "./agregados.js";
 import { montarPersona } from "./persona.js";
 import { admitidosPorMes } from "./admitidos-por-mes.js";
 import { iniciarKeepAlive } from "./keepalive.js";
+import { montarConciliacion } from "./conciliacion.js";
+
+
 
 const app = express();
 
@@ -74,6 +77,7 @@ app.use(
     credentials: true,
   })
 );
+
 
 // ------------------------------------------------------------
 // auth — token obligatorio
@@ -171,6 +175,8 @@ function getSesion() {
 // ============================================================
 // Health
 // ============================================================
+
+montarConciliacion(app, auth, getSesion, traerFormulariosSalesforce);
 
 app.get(
   "/",
