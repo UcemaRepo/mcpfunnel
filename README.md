@@ -73,8 +73,21 @@ npx @modelcontextprotocol/inspector
 
 `GET /conciliacion?desde=2026-01-01` compara los leads que hay ahora en
 Salesforce contra los cargados en la sesión (requiere `/cargar` antes).
-En Windows: `scripts\conciliacion.bat [AAAA-MM-DD] [resumen]`. Pide el token
-o lo toma de la variable `MCP_TOKEN`; guarda la respuesta en un `.json`.
+
+## Script para Windows
+
+`scripts\leadfunnel.bat` abre un menú con:
+
+1. **Iniciar**: despierta el servicio y hace `/cargar` (equipo o todos los asesores).
+2. **Asesores**: leads por asesor y estado (`/agregados?por=asesor&sub=estado`),
+   en pantalla y en un `.csv` para Excel.
+3. **Conciliar**: `/conciliacion` con resumen y lista de anomalías.
+4. **Todo**: las tres seguidas.
+
+También acepta la acción como argumento: `leadfunnel.bat conciliar 2026-03-01`.
+El token se pega en la línea `set "TOKEN="` del archivo, o se toma de la
+variable `MCP_TOKEN`, o se pide al ejecutar. Los resultados quedan en la
+misma carpeta.
 
 ---
 
