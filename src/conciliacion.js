@@ -23,9 +23,16 @@
 //
 // El cruce es por ID (sfId = Formulario_web__c.Id), no por DNI.
 //
+// Se compara desde el 01/01/2026 (hora de Argentina) salvo que se
+// pida otra fecha. Se recortan los dos lados.
+//
 // El registro vive dentro de la sesión: se borra con /reset y se
 // reemplaza en cada /cargar. No toca disco ni base. Sólo guarda
 // ID, nombre y fechas: nunca DNI, teléfono ni email.
+//
+// Quién lo usa:
+//   - GET /conciliacion            (esta misma ruta)
+//   - informe-diario.js            (mail de lunes a viernes)
 // ============================================================
 
 const MAX_MOSTRADOS = 500;
@@ -81,7 +88,7 @@ function anotar(registro, entrada, ahora) {
 // ------------------------------------------------------------
 
 export function conciliarLeads({
-  salesforce = [], // [{ Id, Nombres__c, Apellidos__c, CreatedDate }]
+  salesforce = [], // [{ Id, Nombres__c, Apellidos__c, CreatedDate, LastModifiedDate }]
   leadsSesion = [], // sesion.leads (tienen sfId)
   cargadoEn = null, // sesion.cargadoEn (se fija al TERMINAR la carga)
   duracionMs = 0, // sesion.duracionMs
@@ -198,16 +205,82 @@ export function conciliarLeads({
 }
 
 // ------------------------------------------------------------
+// Ejecución completa: consulta Salesforce, recorta, compara y
+// guarda el resultado en la sesión.
+//
+// La usan la ruta GET /conciliacion y el mail diario, así los dos
+// ven exactamente lo mismo.
+//
+// traerFormularios viene de salesforce.js.
+// ------------------------------------------------------------
+
+export async function ejecutarConciliacion(data, traerFormularios, desde) {
+  const pedido = desde || DESDE_POR_DEFECTO;
+  const desdePedido = fechaDesde(pedido);
+
+  if (!desdePedido) {
+    const error = new Error(
+      `'desde' no es valida: "${pedido}". Formato AAAA-MM-DD, por ejemplo 2026-01-01.`
+    );
+    error.status = 400;
+    throw error;
+  }
+
+  // La sesión sólo tiene leads desde su propia fecha de carga. Si
+  // se pidiera comparar desde antes, los leads anteriores figurarían
+  // como faltantes sin serlo. Por eso nunca se compara antes de eso.
+  const tPedido = Date.parse(desdePedido);
+  const tSesion = Date.parse(data.desde);
+  const ajustado = Number.isFinite(tSesion) && tSesion > tPedido;
+  const desdeEfectivo = ajustado ? data.desde : desdePedido;
+  const tEfectivo = ajustado ? tSesion : tPedido;
+
+  const salesforce = await traerFormularios({
+    desde: desdeEfectivo,
+    todosLosAsesores: data.todosLosAsesores,
+  });
+
+  // Mismo recorte del lado de la sesión: si no, los leads de
+  // antes de la fecha figurarían como "sobrantes".
+  const todos = Array.isArray(data.leads) ? data.leads : [];
+  const leadsSesion = todos.filter((l) => {
+    const t = Date.parse(l.createdDate);
+    return !Number.isFinite(t) || t >= tEfectivo;
+  });
+
+  const { informe, registro } = conciliarLeads({
+    salesforce,
+    leadsSesion,
+    cargadoEn: data.cargadoEn,
+    duracionMs: data.duracionMs,
+    alcance: {
+      desde: desdeEfectivo,
+      desdePedido,
+      desdeAjustadoALaSesion: ajustado,
+      todosLosAsesores: !!data.todosLosAsesores,
+      leadsEnSesionTotal: todos.length,
+      leadsEnSesionFueraDeRango: todos.length - leadsSesion.length,
+    },
+    registroPrevio: data.registroConciliacion || {},
+  });
+
+  // Se guarda dentro de la sesión: /reset lo borra.
+  data.conciliacion = informe;
+  data.registroConciliacion = registro;
+
+  return informe;
+}
+
+// ------------------------------------------------------------
 // Ruta
 // ------------------------------------------------------------
 //
 // GET /conciliacion
+// GET /conciliacion?desde=2026-03-01
 // GET /conciliacion?incluirDetalle=false
 //
-// Cada llamada consulta Salesforce (sólo IDs, nombre y fecha),
+// Cada llamada consulta Salesforce (sólo IDs, nombre y fechas),
 // compara contra la sesión y actualiza el registro.
-//
-// traerFormularios viene de salesforce.js.
 // ------------------------------------------------------------
 
 export function montarConciliacion(app, auth, getSesion, traerFormularios) {
@@ -220,59 +293,12 @@ export function montarConciliacion(app, auth, getSesion, traerFormularios) {
       return res.status(400).json({ ok: false, error: error.message });
     }
 
-    // ---- Desde cuándo se compara -------------------------------
-    const pedido = req.query.desde || DESDE_POR_DEFECTO;
-    const desdePedido = fechaDesde(pedido);
-
-    if (!desdePedido) {
-      return res.status(400).json({
-        ok: false,
-        error: `'desde' no es valida: "${pedido}". Formato AAAA-MM-DD, por ejemplo 2026-01-01.`,
-      });
-    }
-
-    // La sesión sólo tiene leads desde su propia fecha de carga. Si
-    // se pidiera comparar desde antes, los leads anteriores figurarían
-    // como faltantes sin serlo. Por eso nunca se compara antes de eso.
-    const tPedido = Date.parse(desdePedido);
-    const tSesion = Date.parse(data.desde);
-    const ajustado = Number.isFinite(tSesion) && tSesion > tPedido;
-    const desdeEfectivo = ajustado ? data.desde : desdePedido;
-    const tEfectivo = ajustado ? tSesion : tPedido;
-
     try {
-      const salesforce = await traerFormularios({
-        desde: desdeEfectivo,
-        todosLosAsesores: data.todosLosAsesores,
-      });
-
-      // Mismo recorte del lado de la sesión: si no, los leads de
-      // antes de la fecha figurarían como "sobrantes".
-      const todos = Array.isArray(data.leads) ? data.leads : [];
-      const leadsSesion = todos.filter((l) => {
-        const t = Date.parse(l.createdDate);
-        return !Number.isFinite(t) || t >= tEfectivo;
-      });
-
-      const { informe, registro } = conciliarLeads({
-        salesforce,
-        leadsSesion,
-        cargadoEn: data.cargadoEn,
-        duracionMs: data.duracionMs,
-        alcance: {
-          desde: desdeEfectivo,
-          desdePedido,
-          desdeAjustadoALaSesion: ajustado,
-          todosLosAsesores: !!data.todosLosAsesores,
-          leadsEnSesionTotal: todos.length,
-          leadsEnSesionFueraDeRango: todos.length - leadsSesion.length,
-        },
-        registroPrevio: data.registroConciliacion || {},
-      });
-
-      // Se guarda dentro de la sesión: /reset lo borra.
-      data.conciliacion = informe;
-      data.registroConciliacion = registro;
+      const informe = await ejecutarConciliacion(
+        data,
+        traerFormularios,
+        req.query.desde
+      );
 
       const { faltantes, sobrantes, ...resumen } = informe;
       const conDetalle =
@@ -289,8 +315,10 @@ export function montarConciliacion(app, auth, getSesion, traerFormularios) {
         }),
       });
     } catch (error) {
-      console.error(error);
-      return res.status(500).json({ ok: false, error: error.message });
+      if (!error.status) console.error(error);
+      return res
+        .status(error.status || 500)
+        .json({ ok: false, error: error.message });
     }
   });
 }
