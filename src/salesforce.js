@@ -14,6 +14,7 @@ import {
   tasas,
   canonSemestre,
 } from "./transform.js";
+import { datosFeria, enriquecerPersonas } from "./atribucion.js";
 
 const API = "v59.0";
 
@@ -1351,6 +1352,18 @@ export async function cargarLeads(
         item.capita =
           capita;
 
+        // Beca de la Application compatible (null si no hay).
+        item.becaAplicada =
+          appCompatible?.becaAplicada ??
+          null;
+
+        // Feria comprada: se decide aca porque el comentario
+        // no se guarda en el lead.
+        Object.assign(
+          item,
+          datosFeria(r, camps)
+        );
+
         if (
           appCompatible
         ) {
@@ -1385,6 +1398,12 @@ export async function cargarLeads(
         return item;
       }
     );
+
+  // Origen por persona (solo feria, primero feria, etc.).
+  // Usa todos los formularios cargados, de cualquier cohorte.
+  enriquecerPersonas(
+    leads
+  );
 
   const embudoGlobal =
     contarEmbudo(

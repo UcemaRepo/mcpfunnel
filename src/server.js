@@ -25,6 +25,7 @@ import {
 import { montarMcp } from "./mcp.js";
 import { montarPaneles } from "./paneles.js";
 import { montarAgregados } from "./agregados.js";
+import { aplicarFiltrosExtra } from "./atribucion.js";
 import { montarPersona } from "./persona.js";
 import { admitidosPorMes } from "./admitidos-por-mes.js";
 import { iniciarKeepAlive } from "./keepalive.js";
@@ -1017,6 +1018,26 @@ app.get(
           );
       }
 
+      // Origen y filtros de atribucion (mismos que /agregados).
+      if (req.query.origen) {
+        const o =
+          String(req.query.origen).toLowerCase();
+
+        leads =
+          leads.filter(
+            (l) =>
+              String(l.origen || "")
+                .toLowerCase()
+                .includes(o)
+          );
+      }
+
+      leads =
+        aplicarFiltrosExtra(
+          leads,
+          req.query
+        );
+
       // ------------------------------------------------------
       // Paginado
       // ------------------------------------------------------
@@ -1670,7 +1691,9 @@ function filtrarLeads(leads, f = {}) {
     );
   }
 
-  return out;
+  // colegio, admitido, feriaComprada, tipoFormularios,
+  // soloFeriaComprada, primerOrigen y porPersona.
+  return aplicarFiltrosExtra(out, f);
 }
 
 montarAgregados(app, auth, getSesion, filtrarLeads);

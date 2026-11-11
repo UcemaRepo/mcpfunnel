@@ -81,6 +81,54 @@ const filtroCohorte = {
     ),
 };
 
+// Filtros de atribucion compartidos por agregados y buscar_leads
+const filtrosAtribucion = {
+  colegio: z
+    .string()
+    .nullish()
+    .describe("Colegio o parte del nombre, sin importar tildes."),
+
+  admitido: z
+    .enum(["si", "no", "cualquiera"])
+    .nullish()
+    .describe(
+      "'si' = admitido EN EL TERMINO del formulario (comparable con los admitidos directos de Salesforce). 'cualquiera' = admitido en cualquier termino. 'no' = no admitido."
+    ),
+
+  feriaComprada: z
+    .enum(["si", "no", "no_aplica"])
+    .nullish()
+    .describe(
+      "Formulario de feria/evento donde UCEMA no estuvo (feria comprada). 'no_aplica' = no es formulario de feria/evento."
+    ),
+
+  tipoFormularios: z
+    .string()
+    .nullish()
+    .describe(
+      "Recorrido de la persona en TODOS sus formularios: solo_evento, primero_evento, evento_posterior, sin_evento. Acepta varios separados por coma."
+    ),
+
+  soloFeriaComprada: z
+    .enum(["si", "no"])
+    .nullish()
+    .describe(
+      "'si' = la persona solo tiene formularios de feria/evento y todos son de ferias compradas."
+    ),
+
+  primerOrigen: z
+    .string()
+    .nullish()
+    .describe("Origen del primer formulario de la persona."),
+
+  porPersona: z
+    .boolean()
+    .nullish()
+    .describe(
+      "true = un registro por persona (DNI o candidato), el formulario mas antiguo que pase los filtros. Usar para contar personas y no formularios."
+    ),
+};
+
 // ------------------------------------------------------------
 // Servidor MCP
 // ------------------------------------------------------------
@@ -245,7 +293,7 @@ function crearServidor() {
     {
       title: "Buscar leads",
       description:
-        "Leads filtrados por cohorte, programa o estado. Usar para casos concretos; para volúmenes usar 'embudo'.",
+        "Leads filtrados por cohorte, programa, estado, origen, colegio o admision. Usar para casos concretos; para volumenes usar 'agregados'.",
       inputSchema: {
         ...filtroCohorte,
 
@@ -267,6 +315,13 @@ function crearServidor() {
           .describe(
             "Motivo de desiste exacto: Precio, Modalidad, Horarios, Distancia, Plan de estudios, Eligio otra carrera, Eligio otra Universidad, Sin respuesta, No quiso informacion, Datos incorrectos, Otros."
           ),
+
+        origen: z
+          .string()
+          .nullish()
+          .describe("Origen del formulario o parte, ej. 'Ferias', 'Evento'."),
+
+        ...filtrosAtribucion,
 
         limite: z
           .number()
@@ -293,7 +348,7 @@ function crearServidor() {
     {
       title: "Conteos agregados",
       description:
-        "Devuelve conteos de leads agrupados por una o dos dimensiones, calculados en el servidor. USAR ESTA en lugar de 'buscar_leads' para cualquier panel, grafico o pregunta de volumen: devuelve unos pocos KB en vez de traerse decenas de miles de registros individuales. 'buscar_leads' es solo para inspeccionar casos concretos. Para motivos de desiste combinar por='motivoDesiste' con estado='Desiste'; sin ese filtro la categoria 'sin_motivo' domina y no dice nada. La dimension 'tipoDesiste' separa los motivos reales (Precio, Modalidad, Horarios) de las fallas de contactabilidad (Sin respuesta, No quiso informacion, Datos incorrectos), que no explican por que alguien no eligio la universidad.",
+        "Devuelve conteos de leads agrupados por una o dos dimensiones, calculados en el servidor. USAR ESTA en lugar de 'buscar_leads' para cualquier panel, grafico o pregunta de volumen: devuelve unos pocos KB en vez de traerse decenas de miles de registros individuales. 'buscar_leads' es solo para inspeccionar casos concretos. Para motivos de desiste combinar por='motivoDesiste' con estado='Desiste'; sin ese filtro la categoria 'sin_motivo' domina y no dice nada. La dimension 'tipoDesiste' separa los motivos reales (Precio, Modalidad, Horarios) de las fallas de contactabilidad (Sin respuesta, No quiso informacion, Datos incorrectos), que no explican por que alguien no eligio la universidad. Para ferias y eventos: 'tipoFormularios' dice si la persona entro solo por feria, primero por feria o despues; 'feriaComprada' marca ferias donde UCEMA no estuvo; 'admitido' separa admitidos en el termino de los de otro termino. Con metricas=true cada fila trae admitidos, capitas y beca.",
       inputSchema: {
         por: z
           .enum([
@@ -310,6 +365,14 @@ function crearServidor() {
             "programa",
             "motivoDesiste",
             "tipoDesiste",
+            "admitido",
+            "feriaComprada",
+            "tipoFormularios",
+            "soloFeriaComprada",
+            "primerOrigen",
+            "colegioNorm",
+            "campana",
+            "comentarioFeria",
           ])
           .describe("Dimension principal de agrupacion."),
 
@@ -328,6 +391,14 @@ function crearServidor() {
             "programa",
             "motivoDesiste",
             "tipoDesiste",
+            "admitido",
+            "feriaComprada",
+            "tipoFormularios",
+            "soloFeriaComprada",
+            "primerOrigen",
+            "colegioNorm",
+            "campana",
+            "comentarioFeria",
           ])
           .nullish()
           .describe(
@@ -351,6 +422,15 @@ function crearServidor() {
         canal: z.string().nullish(),
         origen: z.string().nullish(),
         motivoDesiste: z.string().nullish(),
+
+        ...filtrosAtribucion,
+
+        metricas: z
+          .boolean()
+          .nullish()
+          .describe(
+            "true agrega por fila: personas, admitidos en el termino, tasaAdmision, capitas, admitidosConBeca, becaPromedioPct y capitasBecadas. Cuenta personas, no formularios."
+          ),
       },
     },
     async (a) => salida(await llamar("/agregados", a))
