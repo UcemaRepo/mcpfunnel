@@ -122,7 +122,14 @@ export function enriquecerPersonas(leads) {
       String(a.createdDate).localeCompare(String(b.createdDate))
     );
 
-    const eventos = forms.map((f) => esOrigenEvento(f.origen));
+    // Los formularios de inscripcion (cargados en las 24 h de la
+    // Application) no dicen como llego la persona: se ignoran
+    // para el recorrido, salvo que sean los unicos que tiene.
+    const reales = forms.filter((f) => !f.formularioInscripcion);
+    const base = reales.length ? reales : forms;
+    const soloInscripcion = !reales.length && forms.length > 0;
+
+    const eventos = base.map((f) => esOrigenEvento(f.origen));
     const hayEvento = eventos.some(Boolean);
     const todosEvento = eventos.every(Boolean);
 
@@ -137,12 +144,13 @@ export function enriquecerPersonas(leads) {
     // Solo feria comprada: todos sus formularios son de
     // feria/evento y todos esos son comprados.
     const soloComprada =
-      todosEvento && forms.every((f) => f.feriaComprada === "si");
+      todosEvento && base.every((f) => f.feriaComprada === "si");
 
     forms.forEach((f, i) => {
       f.formulariosPersona = forms.length;
       f.ordenFormulario = i + 1;
-      f.primerOrigen = forms[0].origen || "sin_origen";
+      f.primerOrigen = base[0].origen || "sin_origen";
+      f.soloInscripcion = soloInscripcion ? "si" : "no";
       f.tipoFormularios = tipo;
       f.soloFeriaComprada = soloComprada ? "si" : "no";
     });

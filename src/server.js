@@ -27,6 +27,7 @@ import { montarPaneles } from "./paneles.js";
 import { montarAgregados } from "./agregados.js";
 import { aplicarFiltrosExtra } from "./atribucion.js";
 import { montarPersona } from "./persona.js";
+import { montarSinMatch } from "./sin-match.js";
 import { admitidosPorMes } from "./admitidos-por-mes.js";
 import { iniciarKeepAlive } from "./keepalive.js";
 import { montarConciliacion } from "./conciliacion.js";
@@ -1697,7 +1698,8 @@ function filtrarLeads(leads, f = {}) {
 }
 
 montarAgregados(app, auth, getSesion, filtrarLeads);
-montarPersona(app, auth);
+montarPersona(app, auth, getSesion);
+montarSinMatch(app, auth, getSesion, resumirAdmitidosCapitas);
 montarPaneles(app, auth);
 montarMcp(app, auth);
 

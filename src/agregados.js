@@ -88,6 +88,16 @@ const DIMENSIONES = {
 
   // Para calibrar FERIA_COMPRADA_REGEX. Usar con origen=Ferias.
   comentarioFeria: (l) => l.comentarioFeria || "no_aplica",
+
+  // si = cargado en las 24 h de la Application (no es el primer
+  // contacto). soloInscripcion = la persona no tiene otro.
+  formularioInscripcion: (l) => (l.formularioInscripcion ? "si" : "no"),
+  soloInscripcion: (l) => l.soloInscripcion || "no",
+
+  // Como se encontro la persona del formulario.
+  dniOrigen: (l) =>
+    l.dniInferido ? "inferido_por_nombre" : /^\d{6,9}$/.test(String(l.dni || "")) ? "formulario" : "sin_dni",
+
 };
 
 export const DIMENSIONES_VALIDAS = Object.keys(DIMENSIONES);

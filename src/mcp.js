@@ -373,6 +373,9 @@ function crearServidor() {
             "colegioNorm",
             "campana",
             "comentarioFeria",
+            "formularioInscripcion",
+            "soloInscripcion",
+            "dniOrigen",
           ])
           .describe("Dimension principal de agrupacion."),
 
@@ -399,6 +402,9 @@ function crearServidor() {
             "colegioNorm",
             "campana",
             "comentarioFeria",
+            "formularioInscripcion",
+            "soloInscripcion",
+            "dniOrigen",
           ])
           .nullish()
           .describe(
@@ -434,6 +440,24 @@ function crearServidor() {
       },
     },
     async (a) => salida(await llamar("/agregados", a))
+  );
+
+  // ── admitidos_sin_match ───────────────────────────────────
+  server.registerTool(
+    "admitidos_sin_match",
+    {
+      title: "Admitidos sin formulario: por que",
+      description:
+        "Toma los admitidos de una cohorte que no se pudieron unir con ningun formulario de la sesion y los busca en vivo en Salesforce (por DNI y por nombre). Clasifica cada uno: 'formulario_fuera_de_la_carga' (hay formulario con su DNI pero /cargar no lo trajo), 'formulario_sin_dni' (hay formulario con su nombre, sin DNI) o 'sin_formulario' (solicitud directa). Devuelve conteos, capitas, origen y propietario del formulario encontrado, y cuantos solo tienen el formulario cargado al inscribir. detalle=true agrega una fila por admitido, sin nombre ni DNI. Es mas lento que las demas herramientas.",
+      inputSchema: {
+        ...filtroCohorte,
+        detalle: z
+          .boolean()
+          .nullish()
+          .describe("true agrega una fila por admitido (sin nombre ni DNI)."),
+      },
+    },
+    async (a) => salida(await llamar("/admitidos/sin-match", a))
   );
 
   // ── buscar_persona ────────────────────────────────────────
