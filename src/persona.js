@@ -47,10 +47,29 @@ async function autenticar() {
   return { token: data.access_token, inst: data.instance_url };
 }
 
-// Escapa comillas para no romper la SOQL con apellidos tipo O'Brien
-const soqlSeguro = (t) => String(t || "").replace(/['\\]/g, "\\$&");
+// Cliente SOQL minimo, reutilizado por sin-match.js.
+export async function clienteSoql() {
+  const { token, inst } = await autenticar();
+  return async (soql) => {
+    const out = [];
+    let url = `${inst}/services/data/${API}/query?q=${encodeURIComponent(soql)}`;
+    while (url) {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (data.errorCode || data[0]?.errorCode) {
+        throw new Error(`SOQL: ${JSON.stringify(data).slice(0, 300)}`);
+      }
+      out.push(...(data.records || []));
+      url = data.nextRecordsUrl ? `${inst}${data.nextRecordsUrl}` : null;
+    }
+    return out;
+  };
+}
 
-export async function fichaPersona({ nombre, apellido, dni }) {
+// Escapa comillas para no romper la SOQL con apellidos tipo O'Brien
+export const soqlSeguro = (t) => String(t || "").replace(/['\\]/g, "\\$&");
+
+export async function fichaPersona({ nombre, apellido, dni }, idsEnSesion = null) {
   if (!nombre && !apellido && !dni) {
     throw new Error("Hace falta al menos nombre, apellido o DNI.");
   }
@@ -144,10 +163,10 @@ export async function fichaPersona({ nombre, apellido, dni }) {
             : "desconocido",
       createdDate: f.CreatedDate,
 
-      // Este es el motivo por el que el lead no esta en la
-      // sesion en memoria, si no lo esta.
-      enDataset:
-        c.tipo === "grado" && !!f.Cuando_Ingresarias__c,
+      // Si el formulario esta cargado en la sesion. Antes era una
+      // estimacion propia (catalogo de grado + semestre) que no
+      // coincidia con lo que carga /cargar. null = sin sesion.
+      enDataset: idsEnSesion ? idsEnSesion.has(f.Id) : null,
     };
   });
 
@@ -211,7 +230,9 @@ export async function fichaPersona({ nombre, apellido, dni }) {
     solicitudes: apps,
 
     nota:
-      "Consulta en vivo contra Salesforce, sin los filtros de la sesion en memoria. Incluye posgrado y registros sin semestre. 'enDataset' indica si ese formulario forma parte del dataset que usan las demas herramientas.",
+      idsEnSesion
+      ? "Consulta en vivo contra Salesforce, sin los filtros de la sesion en memoria. Incluye posgrado y registros sin semestre. 'enDataset' indica si ese formulario esta cargado en la sesion que usan las demas herramientas."
+      : "Consulta en vivo contra Salesforce. No hay sesion cargada, asi que 'enDataset' queda en null.",
   };
 }
 
@@ -219,11 +240,25 @@ export async function fichaPersona({ nombre, apellido, dni }) {
 // Ruta
 // ------------------------------------------------------------
 
-export function montarPersona(app, auth) {
+export function montarPersona(app, auth, getSesion = null) {
   app.get("/persona", auth, async (req, res) => {
     try {
       const { nombre, apellido, dni } = req.query;
-      res.json({ ok: true, ...(await fichaPersona({ nombre, apellido, dni })) });
+
+      let ids = null;
+      try {
+        const data = getSesion ? getSesion() : null;
+        if (data && Array.isArray(data.leads)) {
+          ids = new Set(data.leads.map((l) => l.sfId));
+        }
+      } catch {
+        ids = null; // sin sesion cargada
+      }
+
+      res.json({
+        ok: true,
+        ...(await fichaPersona({ nombre, apellido, dni }, ids)),
+      });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }

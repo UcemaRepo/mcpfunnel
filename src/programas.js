@@ -31,6 +31,15 @@ export const GRADO = {
   CPN: "Contador Público",
   LEC: "Lic. en Economía Empresarial",
   LDI: "Lic. en Dirección de Empresas",
+
+  // Codigos que aparecen en los formularios y no estaban en el
+  // catalogo: los clasificaba como "desconocido".
+  LIEM: "Lic. en Economía Empresarial",
+  ACTU: "Actuario",
+  CCP: "Contador Público",
+  LIAN: "Lic. en Analítica de Negocios",
+  BA: "BA en Artes Liberales y Ciencias",
+  "LIE 25": "Lic. en Economía",
 };
 
 // ── Posgrado ────────────────────────────────────────────────

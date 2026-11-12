@@ -15,6 +15,11 @@ import {
   canonSemestre,
 } from "./transform.js";
 import { datosFeria, enriquecerPersonas } from "./atribucion.js";
+import {
+  indexarAppsPorNombre,
+  inferirDniPorNombre,
+  esFormularioInscripcion,
+} from "./match.js";
 
 const API = "v59.0";
 
@@ -1166,6 +1171,15 @@ export async function cargarLeads(
   const campanasDescartadas =
     new Set();
 
+  // Indice por nombre de los admitidos, para recuperar el
+  // formulario que se cargo sin DNI (ver match.js).
+  const indiceNombres =
+    indexarAppsPorNombre(
+      appsAdmitidas
+    );
+
+  let dnisInferidos = 0;
+
   const leads =
     records.map(
       (r) => {
@@ -1247,10 +1261,33 @@ export async function cargarLeads(
             }
           );
 
-        const dni =
+        let dni =
           limpiarDni(
             r.N_mero_de_documento__c
           );
+
+        // Sin DNI valido: se intenta por nombre contra los
+        // admitidos. Solo si coincide con UNA persona.
+        let dniInferido =
+          false;
+
+        if (
+          !esDniValido(dni)
+        ) {
+          const inf =
+            inferirDniPorNombre(
+              r,
+              indiceNombres
+            );
+
+          if (inf) {
+            dni =
+              inf.dni;
+            dniInferido =
+              true;
+            dnisInferidos++;
+          }
+        }
 
         const contactInfo =
           contactByDni[dni];
@@ -1345,6 +1382,37 @@ export async function cargarLeads(
           item.cohorte ||
           null;
 
+        item.dniInferido =
+          dniInferido;
+
+        item.formularioInscripcion =
+          esFormularioInscripcion(
+            r.CreatedDate,
+            aplicaciones
+          );
+
+        // Formulario sin semestre valido de alguien admitido:
+        // toma la cohorte de su admision. Antes quedaba en
+        // "sin_semestre" y no entraba en ningun cruce.
+        const cohorteValida =
+          !!terminoInfo(
+            cohorteLead
+          ).ano;
+
+        item.cohorteInferida =
+          false;
+
+        if (
+          !cohorteValida &&
+          appCompatible?.termino
+        ) {
+          item.cohorte =
+            appCompatible.termino;
+
+          item.cohorteInferida =
+            true;
+        }
+
         item.idContacto =
           contactInfo?.id ||
           null;
@@ -1378,7 +1446,9 @@ export async function cargarLeads(
 
           item.matchTermino =
             tipoMatchTermino(
-              cohorteLead,
+              item.cohorteInferida
+                ? item.cohorte
+                : cohorteLead,
               appCompatible.termino
             );
         } else {
@@ -1414,13 +1484,14 @@ export async function cargarLeads(
   // Diagnóstico del match
   // ----------------------------------------------------------
 
+  // Incluye los DNI inferidos por nombre (match.js).
   const leadDniSet =
     new Set(
-      records
+      leads
         .map(
-          (r) =>
+          (l) =>
             limpiarDni(
-              r.N_mero_de_documento__c
+              l.dni
             )
         )
         .filter(
@@ -1563,6 +1634,9 @@ export async function cargarLeads(
         Object.keys(
           notaByDni
         ).length,
+
+      // Formularios sin DNI recuperados por nombre (match.js).
+      dnisInferidos,
     },
 
     campanasDescartadas:
@@ -1940,40 +2014,20 @@ export function resumirAdmitidosCapitas(
   // Leads que se usarán para el matching
   // ----------------------------------------------------------
 
-  let leads =
+  // Se cruza contra TODOS los leads, de cualquier cohorte.
+  //
+  // Antes se filtraban por la cohorte pedida ANTES de buscar el
+  // DNI: un admitido 2027S1 cuyo formulario decia 2026S2, 2028 o
+  // no tenia semestre quedaba "sin lead". El match de abajo ya
+  // prefiere el formulario de termino compatible y, si no hay,
+  // usa otro y lo marca con matchTermino "sin_match" y confianza
+  // "baja".
+  const leads =
     Array.isArray(
       sesionActiva.leads
     )
       ? sesionActiva.leads
       : [];
-
-  if (
-    terminoBuscado
-  ) {
-    leads =
-      leads.filter(
-        (l) =>
-          terminosCompatibles(
-            terminoBuscado,
-            l.cohorte ||
-            l.cuandoIngresaria ||
-            l.termino
-          )
-      );
-  } else if (
-    anoBuscado
-  ) {
-    leads =
-      leads.filter(
-        (l) =>
-          terminoInfo(
-            l.cohorte ||
-            l.cuandoIngresaria ||
-            l.termino
-          ).ano ===
-          anoBuscado
-      );
-  }
 
   // ----------------------------------------------------------
   // Índices de leads
@@ -2120,6 +2174,16 @@ export function resumirAdmitidosCapitas(
             app.dni &&
             dniLead &&
             app.dni ===
+              dniLead &&
+            lead.dniInferido
+          ) {
+            // El formulario no tenia DNI: se recupero por nombre.
+            metodoMatch =
+              "nombre";
+          } else if (
+            app.dni &&
+            dniLead &&
+            app.dni ===
               dniLead
           ) {
             metodoMatch =
@@ -2191,6 +2255,17 @@ export function resumirAdmitidosCapitas(
           matchTermino,
 
           confianza,
+
+          formularioInscripcion:
+            lead?.formularioInscripcion ||
+            false,
+
+          // El detalle sale de /admitidos/sin-match, que consulta
+          // Salesforce en vivo.
+          motivoSinMatch:
+            lead
+              ? null
+              : "sin_formulario_en_sesion",
         };
       }
     );
@@ -2338,6 +2413,13 @@ export function resumirAdmitidosCapitas(
         (a) =>
           a.metodoMatch ===
           "persona"
+      ).length,
+
+    nombre:
+      resultado.filter(
+        (a) =>
+          a.metodoMatch ===
+          "nombre"
       ).length,
 
     sinMatch:
