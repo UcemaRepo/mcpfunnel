@@ -517,10 +517,16 @@ function crearCliente({ token, inst }) {
     return out;
   };
 
+  const describe = (objeto) =>
+    get(
+      `${inst}/services/data/${API}/sobjects/${objeto}/describe`
+    );
+
   return {
     query,
     queryAll,
     queryBatched,
+    describe,
   };
 }
 
@@ -553,7 +559,35 @@ function conContacto(app, entrada) {
   return entrada;
 }
 
+// API name del campo "Tipo de ingreso" de hed__Application__c.
+// Se busca por etiqueta con el describe, para no adivinar el
+// nombre: si se pidiera un campo inexistente, la consulta de
+// admitidos fallaria entera. Se puede forzar con la variable
+// CAMPO_TIPO_INGRESO. Si no se encuentra, se sigue sin el dato.
+async function campoTipoDeIngreso(sf) {
+  if (process.env.CAMPO_TIPO_INGRESO) {
+    return process.env.CAMPO_TIPO_INGRESO;
+  }
+
+  try {
+    const d = await sf.describe("hed__Application__c");
+    const campo = (d.fields || []).find((f) =>
+      /tipo\s+de\s+ingreso/i.test(f.label || "")
+    );
+    if (!campo) {
+      console.warn("No se encontro el campo 'Tipo de ingreso' en hed__Application__c");
+    }
+    return campo?.name || null;
+  } catch (err) {
+    console.warn(`No se pudo leer el describe de hed__Application__c: ${err.message}`);
+    return null;
+  }
+}
+
 async function cargarApplicationsAdmitidas(sf) {
+  const campoTipoIngreso =
+    await campoTipoDeIngreso(sf);
+
   const apps =
     await sf.queryAll(`
       SELECT
@@ -575,6 +609,7 @@ async function cargarApplicationsAdmitidas(sf) {
         Beca_aplicada__c,
         hed__Term__r.Name,
         OwnerId,
+        ${campoTipoIngreso ? `${campoTipoIngreso},` : ""}
         CreatedDate
 
       FROM hed__Application__c
@@ -699,6 +734,13 @@ async function cargarApplicationsAdmitidas(sf) {
         tipoPrograma:
           app.Tipo_de_Programa__c ||
           null,
+
+        // "Tipo de ingreso" (ej. Doble titulacion), si el campo
+        // existe en la org. Ver campoTipoDeIngreso.
+        tipoIngreso:
+          campoTipoIngreso
+            ? app[campoTipoIngreso] ?? null
+            : null,
 
         becaAplicada:
           app.Beca_aplicada__c ??
@@ -2342,10 +2384,16 @@ export function resumirAdmitidosCapitas(
 
           // El detalle sale de /admitidos/sin-match, que consulta
           // Salesforce en vivo.
+          // Doble titulacion: se inscriben sin formulario web, asi
+          // que no tener formulario es lo esperable.
           motivoSinMatch:
             lead
               ? null
-              : "sin_formulario_en_sesion",
+              : /doble/i.test(
+                    String(app.tipoIngreso || "")
+                  )
+                ? "doble_titulacion"
+                : "sin_formulario_en_sesion",
         };
       }
     );
@@ -2519,7 +2567,16 @@ export function resumirAdmitidosCapitas(
     sinMatch:
       resultado.filter(
         (a) =>
-          !a.tieneLead
+          !a.tieneLead &&
+          a.motivoSinMatch !==
+            "doble_titulacion"
+      ).length,
+
+    dobleTitulacion:
+      resultado.filter(
+        (a) =>
+          a.motivoSinMatch ===
+          "doble_titulacion"
       ).length,
   };
 
