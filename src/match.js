@@ -113,3 +113,87 @@ export function esFormularioInscripcion(createdDate, aplicaciones = []) {
     return fA != null && Math.abs(f - fA) <= DIA;
   });
 }
+
+// ------------------------------------------------------------
+// Mail y telefono
+// ------------------------------------------------------------
+//
+// Cuando el formulario no tiene DNI y el nombre no alcanza, se
+// prueba con el mail y despues con el telefono del Contact de la
+// Application admitida. Mismas reglas que por nombre: solo contra
+// admitidos, una sola persona y la misma ventana de fechas.
+//
+// Los datos de contacto de la Application viajan como propiedades
+// NO enumerables (ver conContacto en salesforce.js): no se
+// serializan, asi que nunca salen en una respuesta.
+// ------------------------------------------------------------
+
+export function normalizarEmail(texto) {
+  const e = String(texto || "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
+}
+
+// Ultimos 8 digitos: iguala "+54 9 11 5555-1234", "011 15 5555 1234"
+// y "1155551234". Menos de 8 digitos no alcanza para identificar.
+export function normalizarTelefono(texto) {
+  const d = String(texto || "").replace(/\D/g, "");
+  if (d.length < 8) return null;
+  const ult = d.slice(-8);
+  return /^(\d)\1{7}$/.test(ult) ? null : ult; // descarta 11111111
+}
+
+export function indexarAppsPorContacto(apps) {
+  const porEmail = new Map();
+  const porTelefono = new Map();
+
+  const sumar = (mapa, clave, app) => {
+    if (!clave) return;
+    if (!mapa.has(clave)) mapa.set(clave, new Set());
+    mapa.get(clave).add(app);
+  };
+
+  for (const app of apps) {
+    if (!esDniValido(app.dni)) continue;
+    sumar(porEmail, normalizarEmail(app.emailContacto), app);
+    for (const t of app.telefonosContacto || []) {
+      sumar(porTelefono, normalizarTelefono(t), app);
+    }
+  }
+
+  return { porEmail, porTelefono };
+}
+
+function unicaEnVentana(candidatos, createdDate) {
+  if (!candidatos || !candidatos.size) return null;
+  const fForm = fechaMs(createdDate);
+  const validos = [...candidatos].filter((app) => {
+    const fA = fechaApp(app);
+    return fForm == null || fA == null || fForm <= fA + MARGEN_POSTERIOR;
+  });
+  const dnis = new Set(validos.map((a) => a.dni));
+  return dnis.size === 1 ? validos[0] : null;
+}
+
+// Devuelve { dni, app, metodo: "email" | "telefono" } o null.
+export function inferirDniPorContacto(r, indice) {
+  const email = normalizarEmail(r.Correo_electronico__c);
+  const porMail = email && unicaEnVentana(indice.porEmail.get(email), r.CreatedDate);
+  if (porMail) return { dni: porMail.dni, app: porMail, metodo: "email" };
+
+  const tel = normalizarTelefono(r.Telefono__c);
+  const porTel = tel && unicaEnVentana(indice.porTelefono.get(tel), r.CreatedDate);
+  if (porTel) return { dni: porTel.dni, app: porTel, metodo: "telefono" };
+
+  return null;
+}
+
+// Para un formulario CON DNI que no es de ningun admitido (DNI mal
+// tipeado): solo se acepta el cruce por mail/telefono si ademas
+// comparten al menos una palabra del nombre. Evita pasarle el
+// formulario de un hermano al admitido que dejo el mismo mail.
+export function compartenNombre(r, app) {
+  const a = new Set(tokensNombre(app.nombreAlumno));
+  return tokensNombre(`${r.Nombres__c || ""} ${r.Apellidos__c || ""}`).some(
+    (t) => t.length >= 3 && a.has(t)
+  );
+}

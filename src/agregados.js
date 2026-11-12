@@ -96,7 +96,7 @@ const DIMENSIONES = {
 
   // Como se encontro la persona del formulario.
   dniOrigen: (l) =>
-    l.dniInferido ? "inferido_por_nombre" : /^\d{6,9}$/.test(String(l.dni || "")) ? "formulario" : "sin_dni",
+    l.dniInferido ? `inferido_por_${l.dniInferido === true ? "nombre" : l.dniInferido}` : /^\d{6,9}$/.test(String(l.dni || "")) ? "formulario" : "sin_dni",
 
 };
 

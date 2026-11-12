@@ -18,6 +18,9 @@ import { datosFeria, enriquecerPersonas } from "./atribucion.js";
 import {
   indexarAppsPorNombre,
   inferirDniPorNombre,
+  indexarAppsPorContacto,
+  inferirDniPorContacto,
+  compartenNombre,
   esFormularioInscripcion,
 } from "./match.js";
 
@@ -534,6 +537,22 @@ function crearCliente({ token, inst }) {
 //
 // ------------------------------------------------------------
 
+// Mail y telefonos del Contact de la Application, para el cruce
+// con formularios sin DNI (match.js). Van como propiedades NO
+// enumerables: JSON.stringify las ignora, asi que nunca salen en
+// una respuesta de la API ni del MCP.
+function conContacto(app, entrada) {
+  const c = app.hed__Applicant__r || {};
+  Object.defineProperties(entrada, {
+    emailContacto: { value: c.Email || null, enumerable: false },
+    telefonosContacto: {
+      value: [c.MobilePhone, c.Phone].filter(Boolean),
+      enumerable: false,
+    },
+  });
+  return entrada;
+}
+
 async function cargarApplicationsAdmitidas(sf) {
   const apps =
     await sf.queryAll(`
@@ -543,6 +562,9 @@ async function cargarApplicationsAdmitidas(sf) {
         hed__Applicant__c,
         hed__Applicant__r.Name,
         hed__Applicant__r.Numero_de_documento__c,
+        hed__Applicant__r.Email,
+        hed__Applicant__r.MobilePhone,
+        hed__Applicant__r.Phone,
         hed__Application_Status__c,
         hed__Application_Date__c,
         AnoLectivo__c,
@@ -621,7 +643,7 @@ async function cargarApplicationsAdmitidas(sf) {
       !actual ||
       capita > actual.capita
     ) {
-      unique.set(key, {
+      unique.set(key, conContacto(app, {
         idApplication: app.Id,
 
         numeroSolicitud:
@@ -702,7 +724,7 @@ async function cargarApplicationsAdmitidas(sf) {
         ownerId:
           app.OwnerId ||
           null,
-      });
+      }));
     }
   }
 
@@ -1178,7 +1200,17 @@ export async function cargarLeads(
       appsAdmitidas
     );
 
+  const indiceContacto =
+    indexarAppsPorContacto(
+      appsAdmitidas
+    );
+
   let dnisInferidos = 0;
+  const dnisInferidosPor = {
+    nombre: 0,
+    email: 0,
+    telefono: 0,
+  };
 
   const leads =
     records.map(
@@ -1284,9 +1316,53 @@ export async function cargarLeads(
             dni =
               inf.dni;
             dniInferido =
-              true;
-            dnisInferidos++;
+              "nombre";
           }
+        }
+
+        // Despues del nombre: mail y, por ultimo, telefono.
+        if (
+          !esDniValido(dni)
+        ) {
+          const inf =
+            inferirDniPorContacto(
+              r,
+              indiceContacto
+            );
+
+          if (inf) {
+            dni =
+              inf.dni;
+            dniInferido =
+              inf.metodo;
+          }
+        } else if (
+          !dniInferido &&
+          !appsByDni.has(dni)
+        ) {
+          // DNI valido pero de nadie admitido (puede estar mal
+          // tipeado): mail/telefono solo si tambien comparten
+          // parte del nombre.
+          const inf =
+            inferirDniPorContacto(
+              r,
+              indiceContacto
+            );
+
+          if (
+            inf &&
+            compartenNombre(r, inf.app)
+          ) {
+            dni =
+              inf.dni;
+            dniInferido =
+              inf.metodo;
+          }
+        }
+
+        if (dniInferido) {
+          dnisInferidos++;
+          dnisInferidosPor[dniInferido]++;
         }
 
         const contactInfo =
@@ -1637,6 +1713,7 @@ export async function cargarLeads(
 
       // Formularios sin DNI recuperados por nombre (match.js).
       dnisInferidos,
+      dnisInferidosPor,
     },
 
     campanasDescartadas:
@@ -2177,9 +2254,12 @@ export function resumirAdmitidosCapitas(
               dniLead &&
             lead.dniInferido
           ) {
-            // El formulario no tenia DNI: se recupero por nombre.
+            // El formulario no tenia DNI (o no era de un admitido):
+            // se recupero por nombre, mail o telefono.
             metodoMatch =
-              "nombre";
+              lead.dniInferido === true
+                ? "nombre"
+                : lead.dniInferido;
           } else if (
             app.dni &&
             dniLead &&
@@ -2420,6 +2500,20 @@ export function resumirAdmitidosCapitas(
         (a) =>
           a.metodoMatch ===
           "nombre"
+      ).length,
+
+    email:
+      resultado.filter(
+        (a) =>
+          a.metodoMatch ===
+          "email"
+      ).length,
+
+    telefono:
+      resultado.filter(
+        (a) =>
+          a.metodoMatch ===
+          "telefono"
       ).length,
 
     sinMatch:
