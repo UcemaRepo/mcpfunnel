@@ -1,9 +1,24 @@
 // ============================================================
-// informe-diario.js — mail con el informe, lunes a viernes 9:00
+// informe-diario.js — mail con el informe de conciliación
 // ============================================================
 //
-// Cada día hábil, entre las 9:00 y las 9:59 (hora de Argentina),
-// arma el informe de conciliación y lo manda por mail UNA vez.
+// Los LUNES, entre las 9:00 y las 9:59 (hora de Argentina), arma
+// el informe de conciliación y lo manda por mail UNA vez.
+// (El nombre del archivo dice "diario" por historia: los días de
+// envío se definen en DIAS_DE_ENVIO.)
+//
+// También se puede disparar a mano en cualquier momento:
+//
+//   POST /informe-diario/enviar
+//   POST /informe-diario/enviar?desde=2026-03-01
+//
+// El mail muestra cada diferencia y EN QUÉ LADO FALTA:
+//
+//   - Faltan en el sistema:     están en Salesforce, no en lo cargado
+//   - Faltan en Salesforce:     están en lo cargado, ya no en Salesforce
+//
+// Lo más grave va primero (lo que existía y no se cargó), después
+// lo modificado y por último lo nuevo.
 //
 // Por qué un temporizador propio y no un Cron Job de Render: el
 // servicio ya se mantiene despierto con keepalive.js, así que
@@ -19,9 +34,10 @@
 // motivos, SIN nombres. Para incluirlos: MAIL_INCLUIR_NOMBRES=true
 //
 // Variables (además de las de mail.js):
-//   INFORME_HORA=9           hora de envío (0-23), default 9
-//   INFORME_DIARIO=false     apaga el envío automático
-//   MAIL_INCLUIR_NOMBRES     "true" para incluir nombres
+//   INFORME_HORA=9            hora de envío (0-23), default 9
+//   INFORME_DIARIO=false      apaga el envío automático
+//   INFORME_MAX_DETALLE=100   cuántas diferencias lista cada sección
+//   MAIL_INCLUIR_NOMBRES      "true" para incluir nombres
 //
 // Limitaciones: no distingue feriados. Si el servicio se reinicia
 // dentro de la hora de envío, puede mandar el mail dos veces
@@ -32,8 +48,12 @@ import { ejecutarConciliacion } from "./conciliacion.js";
 import { enviarMail, variablesFaltantes, destinatarios } from "./mail.js";
 
 const TZ = "America/Argentina/Buenos_Aires";
-const DIAS_HABILES = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
-const MAX_DETALLE = 50;
+
+// Días en que se envía el informe automático (hora de Argentina).
+//   "Mon" lunes     "Tue" martes   "Wed" miércoles  "Thu" jueves
+//   "Fri" viernes   "Sat" sábado   "Sun" domingo
+const DIAS_DE_ENVIO = new Set(["Mon"]);
+
 const MAX_INTENTOS = 3;
 
 // ------------------------------------------------------------
@@ -43,6 +63,11 @@ const MAX_INTENTOS = 3;
 function horaDeEnvio() {
   const h = Number.parseInt(process.env.INFORME_HORA, 10);
   return h >= 0 && h <= 23 ? h : 9;
+}
+
+function maxDetalle() {
+  const n = Number.parseInt(process.env.INFORME_MAX_DETALLE, 10);
+  return n > 0 ? n : 100;
 }
 
 export function ahoraAR(fecha = new Date()) {
@@ -67,7 +92,7 @@ export function ahoraAR(fecha = new Date()) {
 
 export function debeEnviar(ahora, ultimoDia, hora = horaDeEnvio()) {
   return (
-    DIAS_HABILES.has(ahora.dia) &&
+    DIAS_DE_ENVIO.has(ahora.dia) &&
     ahora.hora === hora &&
     ahora.fecha !== ultimoDia
   );
@@ -80,19 +105,35 @@ export function debeEnviar(ahora, ultimoDia, hora = horaDeEnvio()) {
 const ESTADOS = {
   SIN_DIFERENCIAS: {
     corto: "sin diferencias",
-    largo: "La sesión coincide con Salesforce. No hace falta hacer nada.",
+    largo: "El sistema coincide con Salesforce. No hace falta hacer nada.",
   },
   SESION_DESACTUALIZADA: {
-    corto: "sesión desactualizada",
+    corto: "sistema desactualizado",
     largo:
       "Hubo cambios en Salesforce después de la última carga. Conviene ejecutar /cargar.",
   },
   CON_DIFERENCIAS: {
     corto: "REVISAR",
     largo:
-      "Hay leads que existían antes de la carga, nadie los modificó y no entraron en la sesión. Hay que investigar.",
+      "Hay leads que existían antes de la carga, nadie los modificó y no entraron en el sistema. Hay que investigar.",
   },
 };
+
+const MOTIVOS = {
+  creado_despues_de_la_carga: "creado después de la carga",
+  modificado_despues_de_la_carga: "modificado después de la carga",
+  creado_antes_y_no_esta: "existía y no se cargó (revisar)",
+  ya_no_esta_en_salesforce: "ya no está en Salesforce",
+};
+
+// Lo más grave primero
+const GRAVEDAD = {
+  creado_antes_y_no_esta: 0,
+  modificado_despues_de_la_carga: 1,
+  creado_despues_de_la_carga: 2,
+};
+const porGravedad = (a, b) =>
+  (GRAVEDAD[a.motivo] ?? 9) - (GRAVEDAD[b.motivo] ?? 9);
 
 const esc = (s) =>
   String(s ?? "").replace(
@@ -105,17 +146,10 @@ const ddmmaaaa = (iso) => {
   return a && m && d ? `${d}/${m}/${a}` : String(iso);
 };
 
-const MOTIVOS = {
-  creado_despues_de_la_carga: "creado después de la carga",
-  modificado_despues_de_la_carga: "modificado después de la carga",
-  creado_antes_y_no_esta: "existía y no se cargó (revisar)",
-  ya_no_esta_en_salesforce: "ya no está en Salesforce",
-};
-
 const motivoLegible = (m) => MOTIVOS[m] || String(m || "").replace(/_/g, " ");
 
-function lineaDetalle(f, conNombre) {
-  const partes = [f.idSalesforce, motivoLegible(f.motivo)];
+function lineaDetalle(f, donde, conNombre) {
+  const partes = [f.idSalesforce, `falta en: ${donde}`, motivoLegible(f.motivo)];
   if (conNombre && f.nombre) partes.push(f.nombre);
   if (f.creadoEn) partes.push(`creado ${String(f.creadoEn).slice(0, 10)}`);
   return partes.join(" | ");
@@ -123,17 +157,28 @@ function lineaDetalle(f, conNombre) {
 
 export function armarMail(informe, { ahora, recienCargada = false } = {}) {
   const conNombres = process.env.MAIL_INCLUIR_NOMBRES === "true";
+  const limite = maxDetalle();
   const est = ESTADOS[informe.estado] || { corto: informe.estado, largo: "" };
   const fechaHoy = ddmmaaaa(ahora?.fecha || new Date().toISOString());
   const desde = ddmmaaaa(informe.alcance?.desde || "");
 
   const asunto = `Informe de leads UCEMA ${fechaHoy} - ${est.corto}`;
 
-  const faltantes = informe.faltantes || [];
-  const sobrantes = informe.sobrantes || [];
+  const secciones = [
+    {
+      titulo: "Faltan en el sistema (están en Salesforce)",
+      donde: "sistema",
+      lista: [...(informe.faltantes || [])].sort(porGravedad),
+    },
+    {
+      titulo: "Faltan en Salesforce (están en el sistema)",
+      donde: "Salesforce",
+      lista: informe.sobrantes || [],
+    },
+  ];
 
   const aviso = recienCargada
-    ? "Nota: la sesión estaba vacía (el servicio se reinició), así que se cargó Salesforce recién para este informe. Por eso casi no puede haber diferencias."
+    ? "Nota: el sistema estaba vacío (el servicio se reinició), así que se cargó Salesforce recién para este informe. Por eso casi no puede haber diferencias."
     : "";
 
   // ---- Texto plano ------------------------------------------
@@ -146,24 +191,25 @@ export function armarMail(informe, { ahora, recienCargada = false } = {}) {
   if (aviso) t.push("", aviso);
   t.push("");
   t.push(`Leads en Salesforce: ${informe.totalSalesforce}`);
-  t.push(`Leads en la sesión:  ${informe.totalSesion}`);
+  t.push(`Leads en el sistema: ${informe.totalSesion}`);
   t.push(`Cobertura:           ${informe.porcentajeCobertura}%`);
   t.push("");
-  t.push(`Faltan en la sesión: ${informe.faltantesEnSesion}`);
-  t.push(`  - creados después de la carga:     ${informe.creadosDespuesDeLaCarga}`);
-  t.push(`  - modificados después de la carga: ${informe.modificadosDespuesDeLaCarga}`);
-  t.push(`  - sin explicación (revisar):       ${informe.anomalias}`);
-  t.push(`Sobran en la sesión: ${informe.sobrantesEnSesion}`);
+  t.push(`Faltan en el sistema (están en Salesforce): ${informe.faltantesEnSesion}`);
+  t.push(`   - sin explicación (revisar):       ${informe.anomalias}`);
+  t.push(`   - modificados después de la carga: ${informe.modificadosDespuesDeLaCarga}`);
+  t.push(`   - creados después de la carga:     ${informe.creadosDespuesDeLaCarga}`);
+  t.push(`Faltan en Salesforce (están en el sistema): ${informe.sobrantesEnSesion}`);
 
-  const bloque = (titulo, lista) => {
-    if (!lista.length) return;
-    t.push("", `${titulo} (${Math.min(lista.length, MAX_DETALLE)} de ${lista.length}):`);
-    lista.slice(0, MAX_DETALLE).forEach((f) => t.push(`  ${lineaDetalle(f, conNombres)}`));
-    if (lista.length > MAX_DETALLE) t.push(`  ... y ${lista.length - MAX_DETALLE} más`);
-  };
+  for (const s of secciones) {
+    if (!s.lista.length) continue;
 
-  bloque("Faltan en la sesión", faltantes);
-  bloque("Sobran en la sesión", sobrantes);
+    const mostrados = Math.min(s.lista.length, limite);
+    t.push("", `${s.titulo.toUpperCase()} - ${mostrados} de ${s.lista.length}:`);
+    s.lista.slice(0, limite).forEach((f) => t.push(`  ${lineaDetalle(f, s.donde, conNombres)}`));
+    if (s.lista.length > limite) {
+      t.push(`  ... y ${s.lista.length - limite} más (el listado completo está en /conciliacion)`);
+    }
+  }
 
   const texto = t.join("\n");
 
@@ -171,30 +217,42 @@ export function armarMail(informe, { ahora, recienCargada = false } = {}) {
   const fila = (a, b) =>
     `<tr><td style="padding:4px 12px 4px 0;color:#555">${esc(a)}</td><td style="padding:4px 0"><b>${esc(b)}</b></td></tr>`;
 
-  const tabla = (titulo, lista) => {
-    if (!lista.length) return "";
-    const filas = lista
-      .slice(0, MAX_DETALLE)
+  const th = (x) =>
+    `<th style="text-align:left;padding:3px 10px 3px 0;border-bottom:1px solid #ccc">${esc(x)}</th>`;
+  const td = (x, extra = "") =>
+    `<td style="padding:3px 10px 3px 0;${extra}">${esc(x)}</td>`;
+
+  const tabla = (s) => {
+    if (!s.lista.length) return "";
+
+    const mostrados = Math.min(s.lista.length, limite);
+
+    const cabecera =
+      `<tr>${th("ID Salesforce")}${th("Falta en")}${th("Motivo")}` +
+      `${conNombres ? th("Nombre") : ""}${th("Creado")}</tr>`;
+
+    const filas = s.lista
+      .slice(0, limite)
       .map(
         (f) =>
-          `<tr><td style="padding:3px 10px 3px 0;font-family:monospace">${esc(f.idSalesforce)}</td>` +
-          `<td style="padding:3px 10px 3px 0">${esc(motivoLegible(f.motivo))}</td>` +
-          `<td style="padding:3px 10px 3px 0">${conNombres ? esc(f.nombre || "") : ""}</td>` +
-          `<td style="padding:3px 0">${esc(f.creadoEn ? String(f.creadoEn).slice(0, 10) : "")}</td></tr>`
+          `<tr>${td(f.idSalesforce, "font-family:monospace")}${td(s.donde)}${td(motivoLegible(f.motivo))}` +
+          `${conNombres ? td(f.nombre || "") : ""}${td(f.creadoEn ? String(f.creadoEn).slice(0, 10) : "")}</tr>`
       )
       .join("");
+
     const mas =
-      lista.length > MAX_DETALLE
-        ? `<p style="color:#555">... y ${lista.length - MAX_DETALLE} más.</p>`
+      s.lista.length > limite
+        ? `<p style="color:#555">... y ${s.lista.length - limite} más (el listado completo está en /conciliacion).</p>`
         : "";
+
     return (
-      `<h3 style="margin:20px 0 6px">${esc(titulo)} (${Math.min(lista.length, MAX_DETALLE)} de ${lista.length})</h3>` +
-      `<table style="border-collapse:collapse;font-size:13px">${filas}</table>${mas}`
+      `<h3 style="margin:20px 0 6px">${esc(s.titulo)} (${mostrados} de ${s.lista.length})</h3>` +
+      `<table style="border-collapse:collapse;font-size:13px">${cabecera}${filas}</table>${mas}`
     );
   };
 
   const html =
-    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;max-width:680px">` +
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;max-width:720px">` +
     `<h2 style="margin:0 0 4px">Informe de conciliación de leads</h2>` +
     `<p style="margin:0;color:#555">${esc(fechaHoy)} · comparación desde ${esc(desde)}</p>` +
     `<p style="margin:16px 0 4px"><b>Estado: ${esc(informe.estado)}</b></p>` +
@@ -202,16 +260,15 @@ export function armarMail(informe, { ahora, recienCargada = false } = {}) {
     (aviso ? `<p style="margin:12px 0;color:#8a5a00">${esc(aviso)}</p>` : "") +
     `<table style="margin-top:14px">` +
     fila("Leads en Salesforce", informe.totalSalesforce) +
-    fila("Leads en la sesión", informe.totalSesion) +
+    fila("Leads en el sistema", informe.totalSesion) +
     fila("Cobertura", `${informe.porcentajeCobertura}%`) +
-    fila("Faltan en la sesión", informe.faltantesEnSesion) +
-    fila("   creados después de la carga", informe.creadosDespuesDeLaCarga) +
-    fila("   modificados después de la carga", informe.modificadosDespuesDeLaCarga) +
+    fila("Faltan en el sistema (están en Salesforce)", informe.faltantesEnSesion) +
     fila("   sin explicación (revisar)", informe.anomalias) +
-    fila("Sobran en la sesión", informe.sobrantesEnSesion) +
+    fila("   modificados después de la carga", informe.modificadosDespuesDeLaCarga) +
+    fila("   creados después de la carga", informe.creadosDespuesDeLaCarga) +
+    fila("Faltan en Salesforce (están en el sistema)", informe.sobrantesEnSesion) +
     `</table>` +
-    tabla("Faltan en la sesión", faltantes) +
-    tabla("Sobran en la sesión", sobrantes) +
+    secciones.map(tabla).join("") +
     `</div>`;
 
   return { asunto, texto, html };
@@ -224,12 +281,14 @@ export function armarMail(informe, { ahora, recienCargada = false } = {}) {
 // deps (los pasa server.js):
 //   asegurarSesion()      -> { data, recienCargada }
 //   traerFormularios(...) -> leads actuales de Salesforce
+//
+// opciones.desde: AAAA-MM-DD (opcional, default 2026-01-01)
 // ------------------------------------------------------------
 
-export async function enviarInformeDiario(deps) {
+export async function enviarInformeDiario(deps, { desde } = {}) {
   const { data, recienCargada } = await deps.asegurarSesion();
 
-  const informe = await ejecutarConciliacion(data, deps.traerFormularios);
+  const informe = await ejecutarConciliacion(data, deps.traerFormularios, desde);
 
   const mail = armarMail(informe, { ahora: ahoraAR(), recienCargada });
   const idMail = await enviarMail(mail);
@@ -239,16 +298,17 @@ export async function enviarInformeDiario(deps) {
     estado: informe.estado,
     destinatarios: destinatarios().length,
     recienCargada,
-    faltantes: informe.faltantesEnSesion,
-    sobrantes: informe.sobrantesEnSesion,
+    faltanEnSistema: informe.faltantesEnSesion,
+    faltanEnSalesforce: informe.sobrantesEnSesion,
+    sinExplicacion: informe.anomalias,
   };
 }
 
 async function avisarFallo(error) {
   await enviarMail({
     asunto: "Informe de leads UCEMA - NO SE PUDO GENERAR",
-    texto: `No se pudo generar el informe diario después de ${MAX_INTENTOS} intentos.\n\nError: ${String(error.message).slice(0, 300)}\n\nRevisá los logs del servicio en Render.`,
-    html: `<p>No se pudo generar el informe diario después de ${MAX_INTENTOS} intentos.</p><p><b>Error:</b> ${esc(String(error.message).slice(0, 300))}</p><p>Revisá los logs del servicio en Render.</p>`,
+    texto: `No se pudo generar el informe después de ${MAX_INTENTOS} intentos.\n\nError: ${String(error.message).slice(0, 300)}\n\nRevisá los logs del servicio en Render.`,
+    html: `<p>No se pudo generar el informe después de ${MAX_INTENTOS} intentos.</p><p><b>Error:</b> ${esc(String(error.message).slice(0, 300))}</p><p>Revisá los logs del servicio en Render.</p>`,
   });
 }
 
@@ -265,14 +325,14 @@ export function iniciarInformeDiario(deps, opciones = {}) {
   const { reloj = () => ahoraAR(), cadaMs = 60_000 } = opciones;
 
   if (process.env.INFORME_DIARIO === "false") {
-    console.log("Informe diario: desactivado (INFORME_DIARIO=false)");
+    console.log("Informe automático: desactivado (INFORME_DIARIO=false)");
     return null;
   }
 
   const faltan = variablesFaltantes();
   if (faltan.length) {
     console.warn(
-      `Informe diario: desactivado, faltan variables de entorno: ${faltan.join(", ")}`
+      `Informe automático: desactivado, faltan variables de entorno: ${faltan.join(", ")}`
     );
     return null;
   }
@@ -292,8 +352,8 @@ export function iniciarInformeDiario(deps, opciones = {}) {
       const r = await enviarInformeDiario(deps);
       ultimoDia = ahora.fecha;
       console.log(
-        `Informe diario enviado (${ahora.fecha}): estado ${r.estado}, ` +
-          `${r.faltantes} faltantes, ${r.sobrantes} sobrantes`
+        `Informe enviado (${ahora.fecha}): estado ${r.estado}, ` +
+          `${r.faltanEnSistema} faltan en el sistema, ${r.faltanEnSalesforce} faltan en Salesforce`
       );
     } catch (error) {
       // Hay una carga en curso: se reintenta en el próximo minuto
@@ -303,13 +363,13 @@ export function iniciarInformeDiario(deps, opciones = {}) {
       fallos.n++;
 
       console.error(
-        `Informe diario: intento ${fallos.n}/${MAX_INTENTOS} falló: ${error.message}`
+        `Informe automático: intento ${fallos.n}/${MAX_INTENTOS} falló: ${error.message}`
       );
 
       if (fallos.n >= MAX_INTENTOS) {
         ultimoDia = ahora.fecha; // no insistir más hoy
         await avisarFallo(error).catch((e) =>
-          console.error(`Informe diario: tampoco se pudo enviar el aviso: ${e.message}`)
+          console.error(`Informe automático: tampoco se pudo enviar el aviso: ${e.message}`)
         );
       }
     } finally {
@@ -320,18 +380,22 @@ export function iniciarInformeDiario(deps, opciones = {}) {
   const timer = setInterval(tick, cadaMs);
   timer.unref();
 
-  console.log(
-    `Informe diario: lunes a viernes a las ${horaDeEnvio()}:00 (hora Argentina)`
-  );
+  const nombres = { Mon: "lunes", Tue: "martes", Wed: "miércoles", Thu: "jueves", Fri: "viernes", Sat: "sábados", Sun: "domingos" };
+  const dias = [...DIAS_DE_ENVIO].map((d) => nombres[d] || d).join(", ");
+  console.log(`Informe automático: ${dias} a las ${horaDeEnvio()}:00 (hora Argentina)`);
 
   return { tick, detener: () => clearInterval(timer) };
 }
 
 // ------------------------------------------------------------
-// Ruta manual (para probar sin esperar a las 9)
+// Ruta manual
 // ------------------------------------------------------------
 //
 // POST /informe-diario/enviar
+// POST /informe-diario/enviar?desde=2026-03-01
+//
+// Hace lo mismo que el envío automático, cuando vos quieras.
+// No altera el horario automático.
 // ------------------------------------------------------------
 
 export function montarInformeDiario(app, auth, deps) {
@@ -346,11 +410,13 @@ export function montarInformeDiario(app, auth, deps) {
     }
 
     try {
-      const r = await enviarInformeDiario(deps);
+      const r = await enviarInformeDiario(deps, { desde: req.query.desde });
       return res.json({ ok: true, ...r });
     } catch (error) {
-      console.error(error);
-      return res.status(500).json({ ok: false, error: error.message });
+      if (!error.status) console.error(error);
+      return res
+        .status(error.status || 500)
+        .json({ ok: false, error: error.message });
     }
   });
 }
