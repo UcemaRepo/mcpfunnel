@@ -28,7 +28,7 @@ import { montarAgregados } from "./agregados.js";
 import { montarPersona } from "./persona.js";
 import { admitidosPorMes } from "./admitidos-por-mes.js";
 import { iniciarKeepAlive } from "./keepalive.js";
-import { montarConciliacion } from "./conciliacion.js";
+
 import { montarInformeDiario, iniciarInformeDiario } from "./informe-diario.js";
 
 const app = express();
@@ -194,7 +194,7 @@ async function asegurarSesion() {
 // Health
 // ============================================================
 
-montarConciliacion(app, auth, getSesion, traerFormulariosSalesforce);
+
 
 app.get(
   "/",
