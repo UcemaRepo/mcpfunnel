@@ -6,8 +6,8 @@
 // Salesforce contra los que están cargados en la sesión, y
 // REGISTRA los que no aparecen.
 //
-//   falta_en_sesion  está en Salesforce y NO en la sesión
-//   sobra_en_sesion  está en la sesión y ya NO en Salesforce
+//   falta_en_sesion  está en Salesforce y NO en la sesión  (faltaEn: "sistema")
+//   sobra_en_sesion  está en la sesión y ya NO en Salesforce (faltaEn: "salesforce")
 //
 // Para cada faltante se indica el motivo:
 //
@@ -129,6 +129,7 @@ export function conciliarLeads({
 
     const entrada = {
       tipo: "falta_en_sesion",
+      faltaEn: "sistema", // está en Salesforce y no en lo cargado
       idSalesforce: r.Id,
       nombre: nombreDe(r),
       creadoEn: r.CreatedDate || null,
@@ -147,6 +148,7 @@ export function conciliarLeads({
 
     const entrada = {
       tipo: "sobra_en_sesion",
+      faltaEn: "salesforce", // está en lo cargado y ya no en Salesforce
       idSalesforce: l.sfId,
       nombre: `${l.nombre || ""} ${l.apellido || ""}`.trim() || null,
       creadoEn: l.createdDate || null,
