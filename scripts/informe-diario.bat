@@ -63,6 +63,7 @@ powershell -NoProfile -Command ^
   "Write-Host ('ID del mail (Resend):   ' + $r.idMail);" ^
   "Write-Host ('Estado del informe:     ' + $r.estado);" ^
   "Write-Host ('Destinatarios:          ' + $r.destinatarios);" ^
+  "if ($r.archivoAdjunto) { Write-Host ('Archivo adjunto:        ' + $r.archivoAdjunto) };" ^
   "Write-Host ('Faltan en el sistema:   ' + $r.faltanEnSistema);" ^
   "Write-Host ('Faltan en Salesforce:   ' + $r.faltanEnSalesforce);" ^
   "Write-Host ('Anomalias (sin explic): ' + $r.sinExplicacion);" ^
