@@ -46,6 +46,7 @@
 
 import { ejecutarConciliacion } from "./conciliacion.js";
 import { enviarMail, variablesFaltantes, destinatarios } from "./mail.js";
+import { generarExcelInforme } from "./excel.js";
 
 const TZ = "America/Argentina/Buenos_Aires";
 
@@ -148,15 +149,16 @@ const ddmmaaaa = (iso) => {
 
 const motivoLegible = (m) => MOTIVOS[m] || String(m || "").replace(/_/g, " ");
 
-function lineaDetalle(f, donde, conNombre) {
+function lineaDetalle(f, donde, conNombre = true) {
+  const nombreCompleto = f.nombreCompleto || [f.nombre, f.apellido].filter(Boolean).join(" ") || null;
   const partes = [f.idSalesforce, `falta en: ${donde}`, motivoLegible(f.motivo)];
-  if (conNombre && f.nombre) partes.push(f.nombre);
+  if (conNombre && nombreCompleto) partes.push(nombreCompleto);
   if (f.creadoEn) partes.push(`creado ${String(f.creadoEn).slice(0, 10)}`);
   return partes.join(" | ");
 }
 
 export function armarMail(informe, { ahora, recienCargada = false } = {}) {
-  const conNombres = process.env.MAIL_INCLUIR_NOMBRES === "true";
+  const conNombres = process.env.MAIL_INCLUIR_NOMBRES !== "false";
   const limite = maxDetalle();
   const est = ESTADOS[informe.estado] || { corto: informe.estado, largo: "" };
   const fechaHoy = ddmmaaaa(ahora?.fecha || new Date().toISOString());
@@ -229,14 +231,14 @@ export function armarMail(informe, { ahora, recienCargada = false } = {}) {
 
     const cabecera =
       `<tr>${th("ID Salesforce")}${th("Falta en")}${th("Motivo")}` +
-      `${conNombres ? th("Nombre") : ""}${th("Creado")}</tr>`;
+      `${conNombres ? `${th("Nombre")}${th("Apellido")}` : ""}${th("Creado")}</tr>`;
 
     const filas = s.lista
       .slice(0, limite)
       .map(
         (f) =>
           `<tr>${td(f.idSalesforce, "font-family:monospace")}${td(s.donde)}${td(motivoLegible(f.motivo))}` +
-          `${conNombres ? td(f.nombre || "") : ""}${td(f.creadoEn ? String(f.creadoEn).slice(0, 10) : "")}</tr>`
+          `${conNombres ? `${td(f.nombre || "")}${td(f.apellido || "")}` : ""}${td(f.creadoEn ? String(f.creadoEn).slice(0, 10) : "")}</tr>`
       )
       .join("");
 
@@ -290,7 +292,21 @@ export async function enviarInformeDiario(deps, { desde } = {}) {
 
   const informe = await ejecutarConciliacion(data, deps.traerFormularios, desde);
 
-  const mail = armarMail(informe, { ahora: ahoraAR(), recienCargada });
+  const ahora = ahoraAR();
+  const mail = armarMail(informe, { ahora, recienCargada });
+
+  // Generar y adjuntar archivo Excel (.xlsx)
+  const bufferExcel = await generarExcelInforme(informe, { ahora });
+  const fechaArchivo = ahora?.fecha || new Date().toISOString().slice(0, 10);
+  const nombreArchivo = `informe-leads-ucema-${fechaArchivo}.xlsx`;
+
+  mail.attachments = [
+    {
+      filename: nombreArchivo,
+      content: Buffer.from(bufferExcel).toString("base64"),
+    },
+  ];
+
   const idMail = await enviarMail(mail);
 
   return {
@@ -301,6 +317,7 @@ export async function enviarInformeDiario(deps, { desde } = {}) {
     faltanEnSistema: informe.faltantesEnSesion,
     faltanEnSalesforce: informe.sobrantesEnSesion,
     sinExplicacion: informe.anomalias,
+    archivoAdjunto: nombreArchivo,
   };
 }
 
