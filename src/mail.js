@@ -29,11 +29,13 @@ export function destinatarios() {
     .filter(Boolean);
 }
 
-export async function enviarMail({ asunto, texto, html }) {
+export async function enviarMail({ asunto, texto, html, attachments, adjuntos }) {
   const faltan = variablesFaltantes();
   if (faltan.length) {
     throw new Error(`Faltan variables de entorno: ${faltan.join(", ")}`);
   }
+
+  const listaAdjuntos = attachments || adjuntos;
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -47,6 +49,9 @@ export async function enviarMail({ asunto, texto, html }) {
       subject: asunto,
       text: texto,
       html,
+      ...(Array.isArray(listaAdjuntos) && listaAdjuntos.length > 0
+        ? { attachments: listaAdjuntos }
+        : {}),
     }),
     signal: AbortSignal.timeout(30_000),
   });
