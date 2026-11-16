@@ -29,6 +29,7 @@ import { montarPersona } from "./persona.js";
 import { admitidosPorMes } from "./admitidos-por-mes.js";
 import { iniciarKeepAlive } from "./keepalive.js";
 import { montarConciliacion } from "./conciliacion.js";
+import { montarInformeDiario, iniciarInformeDiario } from "./informe-diario.js";
 
 const app = express();
 
@@ -169,6 +170,24 @@ function getSesion() {
   }
 
   return sesion;
+}
+
+async function asegurarSesion() {
+  if (sesion) return { data: sesion, recienCargada: false };
+  if (cargaEnProceso) {
+    const e = new Error("Hay una carga de Salesforce en proceso.");
+    e.code = "CARGA_EN_PROCESO";
+    throw e;
+  }
+  cargaEnProceso = true;
+  try {
+    // Mismos valores por defecto que POST /cargar
+    sesion = await cargarLeads({ desde: "2025-01-01T00:00:00Z", todosLosAsesores: false });
+    ultimaCarga = new Date().toISOString();
+    return { data: sesion, recienCargada: true };
+  } finally {
+    cargaEnProceso = false;
+  }
 }
 
 // ============================================================
@@ -1674,6 +1693,9 @@ function filtrarLeads(leads, f = {}) {
 }
 
 montarAgregados(app, auth, getSesion, filtrarLeads);
+
+const depsInforme = { asegurarSesion, traerFormularios: traerFormulariosSalesforce };
+montarInformeDiario(app, auth, depsInforme);
 montarPersona(app, auth);
 montarPaneles(app, auth);
 montarMcp(app, auth);
@@ -1749,5 +1771,7 @@ app.listen(
     );
 
     iniciarKeepAlive();
+
+    iniciarInformeDiario(depsInforme);
   }
 );
