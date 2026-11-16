@@ -28,7 +28,7 @@ import { montarAgregados } from "./agregados.js";
 import { montarPersona } from "./persona.js";
 import { admitidosPorMes } from "./admitidos-por-mes.js";
 import { iniciarKeepAlive } from "./keepalive.js";
-
+import { montarConciliacion } from "./conciliacion.js";
 import { montarInformeDiario, iniciarInformeDiario } from "./informe-diario.js";
 
 const app = express();
@@ -1693,6 +1693,10 @@ function filtrarLeads(leads, f = {}) {
 }
 
 montarAgregados(app, auth, getSesion, filtrarLeads);
+
+montarConciliacion(app, auth, getSesion, traerFormulariosSalesforce);
+const depsInforme = { asegurarSesion, traerFormularios: traerFormulariosSalesforce };
+montarInformeDiario(app, auth, depsInforme);
 
 const depsInforme = { asegurarSesion, traerFormularios: traerFormulariosSalesforce };
 montarInformeDiario(app, auth, depsInforme);
