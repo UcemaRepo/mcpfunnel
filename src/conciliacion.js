@@ -127,11 +127,17 @@ export function conciliarLeads({
       }
     }
 
+    const nom = (r.Nombres__c || "").trim();
+    const ape = (r.Apellidos__c || "").trim();
+    const nomCompleto = nombreDe(r) || (r.nombre ? String(r.nombre).trim() : null);
+
     const entrada = {
       tipo: "falta_en_sesion",
       faltaEn: "sistema", // está en Salesforce y no en lo cargado
       idSalesforce: r.Id,
-      nombre: nombreDe(r),
+      nombre: nom || (nomCompleto ? nomCompleto.split(" ")[0] : null),
+      apellido: ape || (nomCompleto && nomCompleto.includes(" ") ? nomCompleto.split(" ").slice(1).join(" ") : null),
+      nombreCompleto: nomCompleto,
       creadoEn: r.CreatedDate || null,
       modificadoEn: r.LastModifiedDate || null,
       motivo,
@@ -146,11 +152,17 @@ export function conciliarLeads({
   for (const l of leadsSesion) {
     if (idsSalesforce.has(l.sfId)) continue;
 
+    const nom = (l.nombre || "").trim();
+    const ape = (l.apellido || "").trim();
+    const nomCompleto = `${nom} ${ape}`.trim() || null;
+
     const entrada = {
       tipo: "sobra_en_sesion",
       faltaEn: "salesforce", // está en lo cargado y ya no en Salesforce
       idSalesforce: l.sfId,
-      nombre: `${l.nombre || ""} ${l.apellido || ""}`.trim() || null,
+      nombre: nom || (nomCompleto ? nomCompleto.split(" ")[0] : null),
+      apellido: ape || (nomCompleto && nomCompleto.includes(" ") ? nomCompleto.split(" ").slice(1).join(" ") : null),
+      nombreCompleto: nomCompleto,
       creadoEn: l.createdDate || null,
       motivo: "ya_no_esta_en_salesforce",
     };
