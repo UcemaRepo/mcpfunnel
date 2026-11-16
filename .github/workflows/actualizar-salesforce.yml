@@ -1,0 +1,33 @@
+name: Actualizar Salesforce semanalmente
+
+on:
+  schedule:
+    # Todos los lunes a las 08:55 de Argentina (UTC-3)
+    - cron: "55 11 * * 1"
+
+  # Permite probar la automatización manualmente desde GitHub
+  workflow_dispatch:
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Despertar Render
+        run: |
+          curl -f -sS \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 10 \
+            --max-time 60 \
+            "${{ secrets.RENDER_URL }}/"
+
+      - name: Actualizar datos de Salesforce
+        run: |
+          curl -f -sS --show-error \
+            --max-time 900 \
+            -X POST "${{ secrets.RENDER_URL }}/cargar" \
+            -H "Authorization: Bearer ${{ secrets.MCP_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
