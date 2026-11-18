@@ -460,6 +460,47 @@ function crearServidor() {
     async (a) => salida(await llamar("/admitidos/sin-match", a))
   );
 
+  // ── errores_mensajeria ────────────────────────────────────
+  server.registerTool(
+    "errores_mensajeria",
+    {
+      title: "Mensajes de WhatsApp que no se entregaron",
+      description:
+        "Consulta EN VIVO en Salesforce los envios de mensajeria que fallaron (objeto MessagingDeliveryError): son los que en la consola muestran el cartel rojo de error dentro del chat (destinatario que bloqueo el numero, plantilla rechazada, numero invalido, etc.). No requiere la sesion cargada. Devuelve total, personas afectadas, conteos por motivo, tipo, canal, quien envio, plantilla y dia, y las personas con mas de un error. detalle=true agrega una fila por error con el Id del usuario de mensajeria y el link a su ficha; el telefono va enmascarado. Usar para 'que mensajes rebotaron', 'quien nos bloqueo', 'que plantilla falla mas'.",
+      inputSchema: {
+        dias: z
+          .number()
+          .int()
+          .nullish()
+          .describe("Ultimos N dias (default 7, maximo 90). Se ignora si viene 'desde'."),
+        desde: z.string().nullish().describe("Fecha inicial AAAA-MM-DD."),
+        hasta: z
+          .string()
+          .nullish()
+          .describe("Fecha final AAAA-MM-DD (incluida). Default: ahora."),
+        tipo: z.string().nullish().describe("Valor exacto del campo Type del error."),
+        motivo: z
+          .string()
+          .nullish()
+          .describe("Texto a buscar dentro del motivo del fallo, ej. 'bloqueado'."),
+        asesor: z
+          .string()
+          .nullish()
+          .describe("Nombre (o parte) de quien envio el mensaje."),
+        detalle: z
+          .boolean()
+          .nullish()
+          .describe("true agrega una fila por error."),
+        limite: z
+          .number()
+          .int()
+          .nullish()
+          .describe("Maximo de filas de detalle (default 200, tope 2000)."),
+      },
+    },
+    async (a) => salida(await llamar("/mensajeria/errores", a))
+  );
+
   // ── buscar_persona ────────────────────────────────────────
   server.registerTool(
     "buscar_persona",

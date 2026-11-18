@@ -47,10 +47,12 @@ async function autenticar() {
   return { token: data.access_token, inst: data.instance_url };
 }
 
-// Cliente SOQL minimo, reutilizado por sin-match.js.
-export async function clienteSoql() {
+// Cliente SOQL minimo, reutilizado por sin-match.js y
+// errores-mensajeria.js. Con { conInstancia: true } devuelve
+// { query, inst } en vez de la funcion sola.
+export async function clienteSoql({ conInstancia = false } = {}) {
   const { token, inst } = await autenticar();
-  return async (soql) => {
+  const query = async (soql) => {
     const out = [];
     let url = `${inst}/services/data/${API}/query?q=${encodeURIComponent(soql)}`;
     while (url) {
@@ -64,6 +66,7 @@ export async function clienteSoql() {
     }
     return out;
   };
+  return conInstancia ? { query, inst } : query;
 }
 
 // Escapa comillas para no romper la SOQL con apellidos tipo O'Brien
