@@ -466,13 +466,13 @@ function crearServidor() {
     {
       title: "Mensajes de WhatsApp que no se entregaron",
       description:
-        "Consulta EN VIVO en Salesforce los envios de mensajeria que fallaron (objeto MessagingDeliveryError): son los que en la consola muestran el cartel rojo de error dentro del chat (destinatario que bloqueo el numero, plantilla rechazada, numero invalido, etc.). No requiere la sesion cargada. Devuelve total, personas afectadas, conteos por motivo, tipo, canal, quien envio, plantilla y dia, y las personas con mas de un error. detalle=true agrega una fila por error con el Id del usuario de mensajeria y el link a su ficha; el telefono va enmascarado. Usar para 'que mensajes rebotaron', 'quien nos bloqueo', 'que plantilla falla mas'.",
+        "Consulta EN VIVO en Salesforce los mensajes de WhatsApp que no se pudieron entregar: son los que en la consola muestran el cartel rojo dentro del chat. Lee las entradas MESSAGE_DELIVERY_FAILED de las conversaciones del periodo (una llamada a la API por conversacion, puede tardar). No requiere la sesion cargada. Devuelve total, personas afectadas y conteos por motivo, codigo de error, quien envio, asesor asignado, canal y dia. detalle=true agrega una fila por fallo con el mensaje que fallo, la sesion y el link; el telefono va enmascarado. Usar para 'que mensajes rebotaron hoy', 'a quien no le llegan los WhatsApp', 'que motivo de fallo es el mas comun'.",
       inputSchema: {
         dias: z
           .number()
           .int()
           .nullish()
-          .describe("Ultimos N dias (default 7, maximo 90). Se ignora si viene 'desde'."),
+          .describe("Ultimos N dias (default 1, maximo 31). Se ignora si viene 'fecha' o 'desde'."),
         fecha: z
           .string()
           .nullish()
@@ -482,11 +482,11 @@ function crearServidor() {
           .string()
           .nullish()
           .describe("Fecha final AAAA-MM-DD (incluida). Default: ahora."),
-        tipo: z.string().nullish().describe("Valor exacto del campo Type del error."),
+        tipo: z.string().nullish().describe("Sin uso: se conserva por compatibilidad."),
         motivo: z
           .string()
           .nullish()
-          .describe("Texto a buscar dentro del motivo del fallo, ej. 'bloqueado'."),
+          .describe("Texto o codigo a buscar en el motivo del fallo, ej. 'experiment' o '2002'. El motivo viene en ingles, como lo devuelve Meta."),
         asesor: z
           .string()
           .nullish()

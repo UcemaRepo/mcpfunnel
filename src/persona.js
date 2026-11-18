@@ -49,7 +49,9 @@ async function autenticar() {
 
 // Cliente SOQL minimo, reutilizado por sin-match.js y
 // errores-mensajeria.js. Con { conInstancia: true } devuelve
-// { query, inst } en vez de la funcion sola.
+// { query, inst, getJson } en vez de la funcion sola. getJson
+// hace un GET autenticado a cualquier ruta de la API (por
+// ejemplo Connect) y devuelve { status, data } sin lanzar error.
 export async function clienteSoql({ conInstancia = false } = {}) {
   const { token, inst } = await autenticar();
   const query = async (soql) => {
@@ -66,7 +68,19 @@ export async function clienteSoql({ conInstancia = false } = {}) {
     }
     return out;
   };
-  return conInstancia ? { query, inst } : query;
+  const getJson = async (ruta) => {
+    const res = await fetch(`${inst}${ruta}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    return { status: res.status, data };
+  };
+  return conInstancia ? { query, inst, getJson } : query;
 }
 
 // Escapa comillas para no romper la SOQL con apellidos tipo O'Brien
