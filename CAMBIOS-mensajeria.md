@@ -16,18 +16,31 @@ El registro `MessagingSession` no lo refleja: en una sesión con el mensaje rebo
 ## Parámetros
 | Parámetro | Qué hace |
 |---|---|
+| `fecha` | Un día completo `AAAA-MM-DD` en hora de Buenos Aires (tiene prioridad sobre los demás) |
 | `dias` | Últimos N días (default 7, máximo 90) |
 | `desde` / `hasta` | Rango `AAAA-MM-DD`, con `hasta` incluido (máximo 90 días) |
 | `tipo` | Valor exacto del campo `Type` |
 | `motivo` | Texto dentro del motivo del fallo; `bloqueado` también encuentra "bloqueó" |
-| `asesor` | Quién envió el mensaje (nombre o parte) |
+| `asesor` | Nombre (o parte) del asesor: quien envió el mensaje o el propietario del usuario de mensajería |
 | `detalle=true` | Una fila por error, con link a la ficha del usuario de mensajería |
+| `nombres=true` | Agrega nombre y apellido del contacto al detalle. Solo funciona si en Render está `ERRORES_CON_NOMBRE=true` |
 | `limite` | Máximo de filas de detalle (default 200, tope 2000) |
 
 ## Qué devuelve
-`total`, `personasAfectadas`, conteos `porMotivo`, `porTipo`, `porCanal`, `porEnviadoPor`, `porPlantilla` y `porDia`, y `reincidentes` (personas con más de un error). En el detalle, el teléfono va enmascarado (`***0283`) y el nombre solo aparece si `ENMASCARAR_PII=false`.
+`total`, `personasAfectadas`, conteos `porMotivo`, `porTipo`, `porCanal`, `porEnviadoPor`, `porAsesorAsignado`, `porPlantilla` y `porDia`, y `reincidentes` (personas con más de un error). En el detalle, el teléfono va enmascarado (`***0283`).
 
-Si la integración no puede leer alguna relación (nombre del canal, del usuario o de quien envió), la consulta se repite solo con los campos base y la respuesta trae `camposDeRelacion: false`. Si no puede leer el objeto, responde 403 con un mensaje claro.
+## Nombre y apellido
+Por defecto no salen. Hay dos formas de habilitarlos:
+- `ENMASCARAR_PII=false`: desenmascara TODO el servidor (leads incluidos).
+- `ERRORES_CON_NOMBRE=true` (recomendada): habilita nombres solo en esta ruta, y solo cuando el pedido trae `nombres=true`. Es la que usa el complemento de Sheets.
+
+Con nombres habilitados, el detalle trae `nombre` y `apellido` (del Contact vinculado al usuario de mensajería), `nombreWhatsapp` (el nombre del usuario de mensajería, a veces el perfil de WhatsApp) y el teléfono completo.
+
+## Si falta algún permiso
+La consulta prueba tres niveles y la respuesta dice cuál usó en `nivelRelacion`:
+- `0`: con contacto (nombre y apellido) y asesor asignado (propietario del usuario de mensajería).
+- `1`: sin contacto ni asesor asignado, con canal y quién envió.
+- `2`: solo campos base. Si no puede leer el objeto, responde 403 con un mensaje claro.
 
 ## Prueba
 ```bash
