@@ -25,9 +25,11 @@
 // Devuelve conteos (por motivo, tipo, canal, quien envio,
 // plantilla y dia) y personas con mas de un error. Con
 // detalle=true agrega una fila por error con el Id del usuario
-// de mensajeria y el link a su ficha en Lightning. El telefono
-// sale enmascarado y el nombre solo aparece si ENMASCARAR_PII
-// es "false", igual que en el resto del servidor.
+// de mensajeria, el asesor asignado y el link a su ficha en
+// Lightning. El telefono sale enmascarado y nombre y apellido
+// solo aparecen con ENMASCARAR_PII=false o, para esta ruta sola,
+// con ERRORES_CON_NOMBRE=true y nombres=true (ver
+// nombresPermitidos).
 // ============================================================
 
 import { clienteSoql, soqlSeguro } from "./persona.js";
@@ -40,10 +42,23 @@ const CAMPOS_BASE = `Id, CreatedDate, Type, FailureReason,
   DestinationPhoneNumber, MessagingEndUserId, MessagingChannelId,
   MessagingTemplateId, CreatedById`;
 
-// Campos por relacion. Si la integracion no puede leer alguno,
-// la consulta se repite solo con los campos base.
-const CAMPOS_RELACION = `, MessagingEndUser.Name,
-  MessagingChannel.MasterLabel, CreatedBy.Name`;
+// Campos por relacion, en niveles. Si la integracion no puede
+// leer alguno, se prueba el nivel siguiente (menos campos) hasta
+// quedar solo con los campos base.
+//   0: + contacto (nombre y apellido) y propietario del usuario
+//      de mensajeria (el asesor asignado)
+//   1: + nombre del usuario de mensajeria, canal y quien envio
+//   2: solo campos base
+const NIVELES_RELACION = [
+  `, MessagingEndUser.Name, MessagingChannel.MasterLabel, CreatedBy.Name,
+  MessagingEndUser.Contact.FirstName, MessagingEndUser.Contact.LastName,
+  MessagingEndUser.Owner.Name`,
+  `, MessagingEndUser.Name, MessagingChannel.MasterLabel, CreatedBy.Name`,
+  "",
+];
+
+// Argentina no tiene horario de verano: el dia local es UTC-3.
+const OFFSET_AR = "-03:00";
 
 const fechaSoql = (d) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
 
@@ -61,7 +76,22 @@ function parsearFecha(valor, finDelDia = false) {
   return d;
 }
 
-export function rangoFechas({ dias, desde, hasta } = {}, ahora = new Date()) {
+export function rangoFechas(
+  { dias, desde, hasta, fecha } = {},
+  ahora = new Date(),
+) {
+  // fecha=AAAA-MM-DD: el dia completo en hora de Buenos Aires.
+  if (fecha) {
+    const f = String(fecha).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) {
+      throw new Error(`Fecha invalida: '${f}'. Usar AAAA-MM-DD.`);
+    }
+    return {
+      inicio: new Date(`${f}T00:00:00${OFFSET_AR}`),
+      fin: new Date(`${f}T23:59:59${OFFSET_AR}`),
+    };
+  }
+
   const fin = parsearFecha(hasta, true) || ahora;
   let inicio = parsearFecha(desde);
 
@@ -78,7 +108,7 @@ export function rangoFechas({ dias, desde, hasta } = {}, ahora = new Date()) {
   return { inicio, fin };
 }
 
-export function armarSoql({ inicio, fin, tipo, motivo }, conRelaciones = true) {
+export function armarSoql({ inicio, fin, tipo }, nivel = 0) {
   const filtros = [
     `CreatedDate >= ${fechaSoql(inicio)}`,
     `CreatedDate <= ${fechaSoql(fin)}`,
@@ -87,7 +117,8 @@ export function armarSoql({ inicio, fin, tipo, motivo }, conRelaciones = true) {
   // FailureReason puede ser texto largo: no admite LIKE en SOQL,
   // por eso el filtro por motivo se aplica despues, en JS.
 
-  return `SELECT ${CAMPOS_BASE}${conRelaciones ? CAMPOS_RELACION : ""}
+  const extra = NIVELES_RELACION[nivel] ?? "";
+  return `SELECT ${CAMPOS_BASE}${extra}
     FROM MessagingDeliveryError
     WHERE ${filtros.join(" AND ")}
     ORDER BY CreatedDate DESC`;
@@ -112,9 +143,19 @@ export function lightningUrl(inst, objeto, id) {
   if (!id) return null;
   const base = String(inst || "").replace(
     /\.my\.salesforce\.com\/?$/,
-    ".lightning.force.com",
+    ".lightning.force.com"
   );
   return `${base}/lightning/r/${objeto}/${id}/view`;
+}
+
+// Nombres en el detalle: con ENMASCARAR_PII=false (todo el
+// servidor sin enmascarar) o, solo para esta ruta, con
+// ERRORES_CON_NOMBRE=true y el parametro nombres=true. Asi el
+// reporte diario puede traer nombre y apellido sin desenmascarar
+// los leads del resto de las herramientas.
+export function nombresPermitidos(pedidos, env = process.env) {
+  if (env.ENMASCARAR_PII === "false") return true;
+  return Boolean(pedidos) && env.ERRORES_CON_NOMBRE === "true";
 }
 
 export function resumirErrores(registros, opts = {}) {
@@ -124,6 +165,7 @@ export function resumirErrores(registros, opts = {}) {
     detalle = false,
     limite = 200,
     enmascarar = true,
+    conNombres = false,
     inst = "",
   } = opts;
 
@@ -134,16 +176,19 @@ export function resumirErrores(registros, opts = {}) {
     motivo: r.FailureReason || null,
     canal: r.MessagingChannel?.MasterLabel || r.MessagingChannelId || null,
     enviadoPor: r.CreatedBy?.Name || r.CreatedById || null,
+    asesorAsignado: r.MessagingEndUser?.Owner?.Name || null,
     plantillaId: r.MessagingTemplateId || null,
     messagingEndUserId: r.MessagingEndUserId || null,
-    nombre: r.MessagingEndUser?.Name || null,
+    nombreWhatsapp: r.MessagingEndUser?.Name || null,
+    nombre: r.MessagingEndUser?.Contact?.FirstName || null,
+    apellido: r.MessagingEndUser?.Contact?.LastName || null,
     telefono: r.DestinationPhoneNumber || null,
   }));
 
   if (motivo) {
     // Compara por raiz de cada palabra: "bloqueado" encuentra
-    // "bloqueo", "bloqueó" y "blocked" no (el motivo puede venir
-    // en ingles: conviene probar ambos idiomas).
+    // "bloqueo" y "bloqueó". El motivo puede venir en ingles:
+    // si no aparece nada, conviene probar "block".
     const raices = sinTildes(motivo)
       .split(/\s+/)
       .filter(Boolean)
@@ -154,8 +199,15 @@ export function resumirErrores(registros, opts = {}) {
     });
   }
   if (asesor) {
+    // Quien envio el mensaje O propietario del usuario de
+    // mensajeria: un envio automatico puede figurar a nombre del
+    // usuario de integracion aunque el contacto sea del asesor.
     const a = sinTildes(asesor);
-    filas = filas.filter((f) => sinTildes(f.enviadoPor).includes(a));
+    filas = filas.filter(
+      (f) =>
+        sinTildes(f.enviadoPor).includes(a) ||
+        sinTildes(f.asesorAsignado).includes(a)
+    );
   }
 
   const porPersona = {};
@@ -181,11 +233,12 @@ export function resumirErrores(registros, opts = {}) {
     porTipo: contar(filas, (f) => f.tipo),
     porCanal: contar(filas, (f) => f.canal),
     porEnviadoPor: contar(filas, (f) => f.enviadoPor),
+    porAsesorAsignado: contar(filas, (f) => f.asesorAsignado),
     porPlantilla: contar(filas, (f) => f.plantillaId),
     porDia: Object.fromEntries(
       Object.entries(contar(filas, (f) => (f.fecha || "").slice(0, 10))).sort(
-        (a, b) => a[0].localeCompare(b[0]),
-      ),
+        (a, b) => a[0].localeCompare(b[0])
+      )
     ),
     reincidentes,
   };
@@ -198,11 +251,16 @@ export function resumirErrores(registros, opts = {}) {
       motivo: f.motivo,
       canal: f.canal,
       enviadoPor: f.enviadoPor,
+      asesorAsignado: f.asesorAsignado,
       plantillaId: f.plantillaId,
       messagingEndUserId: f.messagingEndUserId,
       link: lightningUrl(inst, "MessagingEndUser", f.messagingEndUserId),
-      telefono: maskTel(f.telefono, enmascarar) || null,
-      ...(!enmascarar && { nombre: f.nombre }),
+      telefono: maskTel(f.telefono, enmascarar && !conNombres) || null,
+      ...(conNombres && {
+        nombre: f.nombre,
+        apellido: f.apellido,
+        nombreWhatsapp: f.nombreWhatsapp,
+      }),
     }));
     respuesta.detalleTruncado = filas.length > n;
   }
@@ -210,56 +268,64 @@ export function resumirErrores(registros, opts = {}) {
   return respuesta;
 }
 
+const esErrorDeCampo = (msg) =>
+  /INVALID_FIELD|relationship|No such column/i.test(msg);
+
 export async function traerErrores(params = {}) {
   const { inicio, fin } = rangoFechas(params);
   const { query, inst } = await clienteSoql({ conInstancia: true });
 
-  let registros;
-  let conRelaciones = true;
-  try {
-    registros = await query(armarSoql({ inicio, fin, ...params }, true));
-  } catch (err) {
-    // Sin permiso de lectura sobre alguna relacion: reintenta
-    // con los campos base, que alcanzan para los conteos.
-    if (!/INVALID_FIELD|relationship|No such column/i.test(err.message)) {
-      throw err;
+  // Prueba de mas a menos campos de relacion. Sin permiso de
+  // lectura sobre alguno, baja de nivel; los campos base
+  // alcanzan para los conteos.
+  let ultimoError;
+  for (let nivel = 0; nivel < NIVELES_RELACION.length; nivel++) {
+    try {
+      const registros = await query(armarSoql({ inicio, fin, ...params }, nivel));
+      return { registros, inicio, fin, inst, nivelRelacion: nivel };
+    } catch (err) {
+      if (!esErrorDeCampo(err.message)) throw err;
+      ultimoError = err;
     }
-    conRelaciones = false;
-    registros = await query(armarSoql({ inicio, fin, ...params }, false));
   }
-
-  return { registros, inicio, fin, inst, conRelaciones };
+  throw ultimoError;
 }
 
 export function montarErroresMensajeria(app, auth) {
   app.get("/mensajeria/errores", auth, async (req, res) => {
     try {
       const q = req.query;
-      const detalle = q.detalle === "true" || q.detalle === "si";
+      const si = (v) => v === "true" || v === "si";
+      const detalle = si(q.detalle);
       const enmascarar = process.env.ENMASCARAR_PII !== "false";
+      const conNombres = nombresPermitidos(si(q.nombres));
 
-      const { registros, inicio, fin, inst, conRelaciones } =
+      const { registros, inicio, fin, inst, nivelRelacion } =
         await traerErrores(q);
 
       res.json({
         ok: true,
         desde: inicio.toISOString(),
         hasta: fin.toISOString(),
-        piiEnmascarada: enmascarar,
-        camposDeRelacion: conRelaciones,
+        piiEnmascarada: enmascarar && !conNombres,
+        nombresIncluidos: detalle && conNombres,
+        // 0 = con contacto y asesor asignado, 1 = sin ellos,
+        // 2 = solo campos base (ver NIVELES_RELACION)
+        nivelRelacion,
         ...resumirErrores(registros, {
           motivo: q.motivo,
           asesor: q.asesor,
           detalle,
           limite: q.limite,
           enmascarar,
+          conNombres,
           inst,
         }),
       });
     } catch (err) {
       console.error("Error /mensajeria/errores:", err);
       const esPermiso = /INSUFFICIENT_ACCESS|INVALID_TYPE|sObject type/i.test(
-        err.message,
+        err.message
       );
       res.status(esPermiso ? 403 : 500).json({
         ok: false,

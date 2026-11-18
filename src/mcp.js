@@ -473,6 +473,10 @@ function crearServidor() {
           .int()
           .nullish()
           .describe("Ultimos N dias (default 7, maximo 90). Se ignora si viene 'desde'."),
+        fecha: z
+          .string()
+          .nullish()
+          .describe("Un dia completo AAAA-MM-DD en hora de Buenos Aires. Tiene prioridad sobre dias/desde/hasta."),
         desde: z.string().nullish().describe("Fecha inicial AAAA-MM-DD."),
         hasta: z
           .string()
@@ -486,7 +490,7 @@ function crearServidor() {
         asesor: z
           .string()
           .nullish()
-          .describe("Nombre (o parte) de quien envio el mensaje."),
+          .describe("Nombre (o parte) del asesor: quien envio el mensaje o el propietario del usuario de mensajeria."),
         detalle: z
           .boolean()
           .nullish()
