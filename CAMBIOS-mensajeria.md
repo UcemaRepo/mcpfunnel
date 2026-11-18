@@ -1,57 +1,57 @@
 # Errores de entrega de mensajería (WhatsApp)
 
-Sirve para ver qué mensajes no llegaron sin abrir cada chat en la consola de Servicio.
+Sirve para ver qué mensajes de WhatsApp no llegaron sin abrir cada chat en la consola de Servicio.
 
-## Por qué
-El cartel rojo dentro del chat ("No se pueden enviar mensajes a este destinatario porque lo ha bloqueado", plantilla rechazada, número inválido) solo se ve con la conversación abierta. Lo arma el componente `scrt-message-error-info` con los mensajes de la conversación, que se cargan al abrirla.
+## De dónde sale el dato (corregido)
+Cuando un mensaje no se puede entregar, Salesforce agrega a la conversación una entrada de tipo **`MESSAGE_DELIVERY_FAILED`** con `errorCode`, `errorMessage` y el identificador del mensaje que falló. Es lo que la consola dibuja como cartel rojo dentro del chat. En la consola se ve traducido como "lo ha bloqueado", pero el texto real de Meta puede ser otro (por ejemplo, código 2002: *"this user's phone number is part of an experiment"*).
 
-El registro `MessagingSession` no lo refleja: en una sesión con el mensaje rebotado, `ErrorReason` estaba vacío y `AgentMessageCount` en 0. Lo que sí queda guardado es un registro del objeto estándar **`MessagingDeliveryError`** por cada envío fallido. Esta función consulta ese objeto.
+La primera versión de esta ruta usaba el objeto `MessagingDeliveryError`, y eso estaba mal: ese objeto solo registra fallos del sistema viejo de *triggered outbound*. Con mensajería mejorada queda vacío, así que devolvía 0 aunque hubiera fallos. Verificado con la conversación de Lara Bianchini (MS-00018896 y MS-00168850).
+
+Ese dato no se puede consultar por SOQL, así que la ruta ahora:
+1. busca las sesiones de mensajería activas ese día, con el identificador de su conversación;
+2. pide las entradas de cada conversación a la API Connect (`/connect/conversation/{id}/entries`), filtradas por el día;
+3. se queda con las `MESSAGE_DELIVERY_FAILED`.
+
+Hace una llamada a la API por conversación, de a 5 en paralelo. Un día con cientos de envíos tarda más que antes.
 
 ## Qué cambia
-- `src/errores-mensajeria.js` (nuevo): ruta `GET /mensajeria/errores`. Consulta Salesforce en vivo, así que no hace falta `/cargar` antes.
-- `src/server.js`: monta la ruta (2 líneas). Pide token, igual que las demás.
-- `src/mcp.js`: nueva herramienta MCP `errores_mensajeria`. Tech&Grow la detecta sola.
-- `src/persona.js`: `clienteSoql({ conInstancia: true })` devuelve también la URL de la instancia, para armar los links. Si se llama sin argumentos funciona igual que antes, así que `sin-match.js` no cambia.
+- `src/errores-mensajeria.js`: reescrito con la lógica de arriba. La respuesta mantiene la misma forma, así que la extensión de Chrome sigue funcionando sin cambios.
+- Nueva ruta `GET /mensajeria/diagnostico?sesion=MS-00168850`: muestra, sin datos personales, si la API Connect responde y qué entradas trae una sesión conocida. Sirve para verificar después del deploy.
+- `src/persona.js`: `clienteSoql({ conInstancia: true })` devuelve también `getJson`, un GET autenticado a cualquier ruta de la API.
+- `src/mcp.js`: se actualizan la descripción y los parámetros de `errores_mensajeria`.
 
-## Parámetros
+## Parámetros de /mensajeria/errores
 | Parámetro | Qué hace |
 |---|---|
-| `fecha` | Un día completo `AAAA-MM-DD` en hora de Buenos Aires (tiene prioridad sobre los demás) |
-| `dias` | Últimos N días (default 7, máximo 90) |
-| `desde` / `hasta` | Rango `AAAA-MM-DD`, con `hasta` incluido (máximo 90 días) |
-| `tipo` | Valor exacto del campo `Type` |
-| `motivo` | Texto dentro del motivo del fallo; `bloqueado` también encuentra "bloqueó" |
-| `asesor` | Nombre (o parte) del asesor: quien envió el mensaje o el propietario del usuario de mensajería |
-| `detalle=true` | Una fila por error, con link a la ficha del usuario de mensajería |
-| `nombres=true` | Agrega nombre y apellido del contacto al detalle. Solo funciona si en Render está `ERRORES_CON_NOMBRE=true` |
+| `fecha` | Un día completo `AAAA-MM-DD` en hora de Buenos Aires (tiene prioridad) |
+| `dias` | Últimos N días (default 1, máximo 31) |
+| `desde` / `hasta` | Rango `AAAA-MM-DD` (máximo 31 días) |
+| `motivo` | Texto o código del fallo, por ejemplo `experiment` o `2002`. El motivo viene en inglés, como lo manda Meta |
+| `asesor` | Nombre (o parte) de quien envió el mensaje o del propietario del usuario de mensajería |
+| `detalle=true` | Una fila por fallo: fecha, código, motivo, mensaje que falló, quién lo envió, asesor asignado, sesión y link a la sesión |
+| `nombres=true` | Agrega nombre y apellido del contacto. Solo funciona con `ERRORES_CON_NOMBRE=true` en Render |
 | `limite` | Máximo de filas de detalle (default 200, tope 2000) |
 
-## Qué devuelve
-`total`, `personasAfectadas`, conteos `porMotivo`, `porTipo`, `porCanal`, `porEnviadoPor`, `porAsesorAsignado`, `porPlantilla` y `porDia`, y `reincidentes` (personas con más de un error). En el detalle, el teléfono va enmascarado (`***0283`).
+La respuesta también trae `sesionesRevisadas`, `conversacionesRevisadas`, `conversacionesConError` y `ejemploError`, para saber si alguna conversación no se pudo leer.
+
+## Verificar después del deploy
+Abrí en el navegador (cambiando la URL y el token):
+```
+https://TU-APP.onrender.com/mensajeria/diagnostico?sesion=MS-00168850&k=TU_MCP_TOKEN
+```
+Tiene que decir `"apiConnect": "ok"` y listar 2 fallos con código 2002.
+
+Si dice algo como `403 FUNCTIONALITY_NOT_ENABLED` o `INSUFFICIENT_ACCESS`, el código está bien y falta un permiso en Salesforce (lo hace el administrador de la org):
+- **Configuración → Conversation Service APIs**: activarlo, si existe en la org.
+- El usuario de la Connected App necesita acceso a las sesiones y conversaciones de mensajería (permiso de lectura sobre `MessagingSession` y `Conversation`, y los permisos de mensajería de Digital Engagement).
 
 ## Nombre y apellido
-Por defecto no salen. Hay dos formas de habilitarlos:
-- `ENMASCARAR_PII=false`: desenmascara TODO el servidor (leads incluidos).
-- `ERRORES_CON_NOMBRE=true` (recomendada): habilita nombres solo en esta ruta, y solo cuando el pedido trae `nombres=true`. Es la que usa el complemento de Sheets.
+Hay dos formas de habilitarlos:
+- `ERRORES_CON_NOMBRE=true` (recomendada): habilita nombres solo en esta ruta, y solo cuando el pedido trae `nombres=true`.
+- `ENMASCARAR_PII=false`: desenmascara todo el servidor.
 
-Con nombres habilitados, el detalle trae `nombre` y `apellido` (del Contact vinculado al usuario de mensajería), `nombreWhatsapp` (el nombre del usuario de mensajería, a veces el perfil de WhatsApp) y el teléfono completo.
-
-## Si falta algún permiso
-La consulta prueba tres niveles y la respuesta dice cuál usó en `nivelRelacion`:
-- `0`: con contacto (nombre y apellido) y asesor asignado (propietario del usuario de mensajería).
-- `1`: sin contacto ni asesor asignado, con canal y quién envió.
-- `2`: solo campos base. Si no puede leer el objeto, responde 403 con un mensaje claro.
-
-## Prueba
-```bash
-curl "https://TU-APP.onrender.com/mensajeria/errores?dias=7&detalle=true" \
-  -H "Authorization: Bearer $MCP_TOKEN"
-```
-
-## Antes de usarlo, verificá
-1. Que el usuario de la Connected App pueda leer `MessagingDeliveryError` (el permiso es de ese usuario, no del tuyo).
-2. Qué textos trae `FailureReason` en tu org. Pueden venir en inglés: si `motivo=bloqueado` no encuentra nada, probá con `motivo=block`.
-3. Que el caso conocido (MS-00018896, Lara Bianchini) aparezca en el resultado.
-
-## Cómo subirlo
-Con git: `git apply leadfunnel-errores-mensajeria.patch`. Desde la web de GitHub: subí los 4 archivos del zip respetando las carpetas. Render redespliega solo.
+## Si falta algún permiso de campos
+La consulta de sesiones prueba tres niveles y la respuesta dice cuál usó en `nivelRelacion`:
+- `0`: con contacto (nombre y apellido), asesor asignado, teléfono y canal.
+- `1`: sin contacto ni propietario del usuario de mensajería.
+- `2`: solo campos base.
