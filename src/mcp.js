@@ -460,51 +460,6 @@ function crearServidor() {
     async (a) => salida(await llamar("/admitidos/sin-match", a))
   );
 
-  // ── errores_mensajeria ────────────────────────────────────
-  server.registerTool(
-    "errores_mensajeria",
-    {
-      title: "Mensajes de WhatsApp que no se entregaron",
-      description:
-        "Consulta EN VIVO en Salesforce los mensajes de WhatsApp que no se pudieron entregar: son los que en la consola muestran el cartel rojo dentro del chat. Lee las entradas MESSAGE_DELIVERY_FAILED de las conversaciones del periodo (una llamada a la API por conversacion, puede tardar). No requiere la sesion cargada. Devuelve total, personas afectadas y conteos por motivo, codigo de error, quien envio, asesor asignado, canal y dia. detalle=true agrega una fila por fallo con el mensaje que fallo, la sesion y el link; el telefono va enmascarado. Usar para 'que mensajes rebotaron hoy', 'a quien no le llegan los WhatsApp', 'que motivo de fallo es el mas comun'.",
-      inputSchema: {
-        dias: z
-          .number()
-          .int()
-          .nullish()
-          .describe("Ultimos N dias (default 1, maximo 31). Se ignora si viene 'fecha' o 'desde'."),
-        fecha: z
-          .string()
-          .nullish()
-          .describe("Un dia completo AAAA-MM-DD en hora de Buenos Aires. Tiene prioridad sobre dias/desde/hasta."),
-        desde: z.string().nullish().describe("Fecha inicial AAAA-MM-DD."),
-        hasta: z
-          .string()
-          .nullish()
-          .describe("Fecha final AAAA-MM-DD (incluida). Default: ahora."),
-        tipo: z.string().nullish().describe("Sin uso: se conserva por compatibilidad."),
-        motivo: z
-          .string()
-          .nullish()
-          .describe("Texto o codigo a buscar en el motivo del fallo, ej. 'experiment' o '2002'. El motivo viene en ingles, como lo devuelve Meta."),
-        asesor: z
-          .string()
-          .nullish()
-          .describe("Nombre (o parte) del asesor: quien envio el mensaje o el propietario del usuario de mensajeria."),
-        detalle: z
-          .boolean()
-          .nullish()
-          .describe("true agrega una fila por error."),
-        limite: z
-          .number()
-          .int()
-          .nullish()
-          .describe("Maximo de filas de detalle (default 200, tope 2000)."),
-      },
-    },
-    async (a) => salida(await llamar("/mensajeria/errores", a))
-  );
-
   // ── buscar_persona ────────────────────────────────────────
   server.registerTool(
     "buscar_persona",
