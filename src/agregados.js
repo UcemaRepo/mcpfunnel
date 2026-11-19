@@ -16,6 +16,14 @@
 
 import { estadoAdmision, becaPct } from "./atribucion.js";
 import { normalizar } from "./transform.js";
+import {
+  calidadLead,
+  tipoColegio,
+  rangoDni,
+  cantCarreras,
+  contactabilidad,
+  TERMINO_OBJETIVO_DEFAULT,
+} from "./calidad.js";
 
 // Dimensiones por las que se puede agrupar.
 // El valor es una funcion, no un nombre de campo, porque
@@ -98,12 +106,37 @@ const DIMENSIONES = {
   dniOrigen: (l) =>
     l.dniInferido ? `inferido_por_${l.dniInferido === true ? "nombre" : l.dniInferido}` : /^\d{6,9}$/.test(String(l.dni || "")) ? "formulario" : "sin_dni",
 
+  // ── Calidad de lead (ver calidad.js) ──
+  // alta / media / media_baja / mala, relativa al termino
+  // objetivo (param terminoObjetivo; default el termino filtrado
+  // o 2027S1).
+  calidad: (l, ctx) => calidadLead(l, ctx.terminoObjetivo).nivel,
+
+  // Multivaluado: por que no llego a alta. Un lead puede fallar
+  // por varios motivos dentro de su nivel.
+  motivoCalidad: (l, ctx) => {
+    const { motivos } = calidadLead(l, ctx.terminoObjetivo);
+    return motivos.length ? motivos : ["cumple_todo"];
+  },
+
+  // privado / publico / sin_dato / no_determinado (heuristica
+  // sobre el nombre libre del colegio).
+  tipoColegio: (l) => tipoColegio(l.colegio),
+
+  // 44M_a_49M / menor_44M / 50M_o_mas / sin_dni
+  rangoDni: (l) => rangoDni(l),
+
+  // Carreras de grado distintas elegidas en el formulario.
+  cantCarreras: (l) => cantCarreras(l),
+
+  // con_respuesta / sin_respuesta / nuevo
+  contactabilidad: (l) => contactabilidad(l),
 };
 
 export const DIMENSIONES_VALIDAS = Object.keys(DIMENSIONES);
 
-function valoresDe(lead, dim) {
-  const v = DIMENSIONES[dim](lead);
+function valoresDe(lead, dim, ctx = {}) {
+  const v = DIMENSIONES[dim](lead, ctx);
   return Array.isArray(v) ? (v.length ? v : [`sin_${dim}`]) : [v];
 }
 
@@ -156,7 +189,8 @@ function cerrarMetrica(m) {
 }
 
 export function agregar(leads, dim1, dim2 = null, opciones = {}) {
-  const { topN = 0, metricas = false } = opciones;
+  const { topN = 0, metricas = false, terminoObjetivo } = opciones;
+  const ctx = { terminoObjetivo: terminoObjetivo || TERMINO_OBJETIVO_DEFAULT };
 
   const conteo = new Map();
   let total = 0;
@@ -165,7 +199,7 @@ export function agregar(leads, dim1, dim2 = null, opciones = {}) {
   for (const l of leads) {
     if (global) sumarMetrica(global, l);
 
-    for (const v1 of valoresDe(l, dim1)) {
+    for (const v1 of valoresDe(l, dim1, ctx)) {
       if (!conteo.has(v1)) {
         conteo.set(v1, {
           total: 0,
@@ -181,7 +215,7 @@ export function agregar(leads, dim1, dim2 = null, opciones = {}) {
       if (entrada.m) sumarMetrica(entrada.m, l);
 
       if (dim2) {
-        for (const v2 of valoresDe(l, dim2)) {
+        for (const v2 of valoresDe(l, dim2, ctx)) {
           entrada.sub.set(v2, (entrada.sub.get(v2) || 0) + 1);
           if (entrada.subM) {
             if (!entrada.subM.has(v2)) entrada.subM.set(v2, nuevaMetrica());
@@ -261,6 +295,7 @@ export function montarAgregados(app, auth, getSesion, filtrarLeads) {
         sub,
         topN,
         metricas,
+        terminoObjetivo,
         ...filtros
       } = req.query;
 
@@ -289,6 +324,8 @@ export function montarAgregados(app, auth, getSesion, filtrarLeads) {
         ...agregar(leads, por, sub || null, {
           topN: parseInt(topN, 10) || 0,
           metricas: metricas === "true" || metricas === "si",
+          terminoObjetivo:
+            terminoObjetivo || filtros.termino || filtros.term || undefined,
         }),
       });
     } catch (error) {
