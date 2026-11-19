@@ -21,6 +21,7 @@
 // campos del lead para que /agregados y /leads filtren rapido.
 // ============================================================
 
+import { calidadLead, contactabilidad } from "./calidad.js";
 import { normalizar } from "./transform.js";
 
 // ------------------------------------------------------------
@@ -262,6 +263,20 @@ export function aplicarFiltrosExtra(leads, f = {}) {
       }
     }
     out = [...vistos.values()];
+  }
+
+  // Calidad y contactabilidad van DESPUES de porPersona: asi el
+  // listado coincide con los conteos de agregados (que tambien
+  // clasifican el formulario elegido por persona).
+  if (f.calidad) {
+    const vs = lista(f.calidad);
+    const obj = f.terminoObjetivo || f.termino || f.term || undefined;
+    out = out.filter((l) => vs.includes(calidadLead(l, obj).nivel));
+  }
+
+  if (f.contactabilidad) {
+    const vs = lista(f.contactabilidad);
+    out = out.filter((l) => vs.includes(contactabilidad(l)));
   }
 
   return out;

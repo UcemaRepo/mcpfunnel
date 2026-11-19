@@ -121,6 +121,20 @@ const filtrosAtribucion = {
     .nullish()
     .describe("Origen del primer formulario de la persona."),
 
+  calidad: z
+    .string()
+    .nullish()
+    .describe(
+      "Nivel de calidad: alta, media, media_baja, mala. Acepta varios separados por coma. Se mide contra terminoObjetivo o el termino filtrado (default 2027S1)."
+    ),
+
+  contactabilidad: z
+    .string()
+    .nullish()
+    .describe(
+      "con_respuesta, sin_respuesta o nuevo. Acepta varios separados por coma."
+    ),
+
   campana: z
     .string()
     .nullish()
