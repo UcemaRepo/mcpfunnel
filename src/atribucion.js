@@ -235,6 +235,16 @@ export function aplicarFiltrosExtra(leads, f = {}) {
     out = out.filter((l) => normalizar(l.soloFeriaComprada) === v);
   }
 
+  // Campaña de Salesforce o parte del nombre ("Ciencias Pol").
+  if (f.campana) {
+    const c = normalizar(f.campana);
+    out = out.filter((l) =>
+      (Array.isArray(l.campanas) ? l.campanas : []).some((x) =>
+        normalizar(x).includes(c)
+      )
+    );
+  }
+
   if (f.primerOrigen) {
     const o = normalizar(f.primerOrigen);
     out = out.filter((l) => normalizar(l.primerOrigen).includes(o));

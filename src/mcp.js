@@ -121,6 +121,13 @@ const filtrosAtribucion = {
     .nullish()
     .describe("Origen del primer formulario de la persona."),
 
+  campana: z
+    .string()
+    .nullish()
+    .describe(
+      "Campaña de Salesforce o parte del nombre, sin importar tildes. Ej. 'I - Ciencias Politicas', 'Ferias compradas'."
+    ),
+
   porPersona: z
     .boolean()
     .nullish()
@@ -348,7 +355,7 @@ function crearServidor() {
     {
       title: "Conteos agregados",
       description:
-        "Devuelve conteos de leads agrupados por una o dos dimensiones, calculados en el servidor. USAR ESTA en lugar de 'buscar_leads' para cualquier panel, grafico o pregunta de volumen: devuelve unos pocos KB en vez de traerse decenas de miles de registros individuales. 'buscar_leads' es solo para inspeccionar casos concretos. Para motivos de desiste combinar por='motivoDesiste' con estado='Desiste'; sin ese filtro la categoria 'sin_motivo' domina y no dice nada. La dimension 'tipoDesiste' separa los motivos reales (Precio, Modalidad, Horarios) de las fallas de contactabilidad (Sin respuesta, No quiso informacion, Datos incorrectos), que no explican por que alguien no eligio la universidad. Para ferias y eventos: 'tipoFormularios' dice si la persona entro solo por feria, primero por feria o despues; 'feriaComprada' marca ferias donde UCEMA no estuvo; 'admitido' separa admitidos en el termino de los de otro termino. Con metricas=true cada fila trae admitidos, capitas y beca.",
+        "Devuelve conteos de leads agrupados por una o dos dimensiones, calculados en el servidor. USAR ESTA en lugar de 'buscar_leads' para cualquier panel, grafico o pregunta de volumen: devuelve unos pocos KB en vez de traerse decenas de miles de registros individuales. 'buscar_leads' es solo para inspeccionar casos concretos. Para motivos de desiste combinar por='motivoDesiste' con estado='Desiste'; sin ese filtro la categoria 'sin_motivo' domina y no dice nada. La dimension 'tipoDesiste' separa los motivos reales (Precio, Modalidad, Horarios) de las fallas de contactabilidad (Sin respuesta, No quiso informacion, Datos incorrectos), que no explican por que alguien no eligio la universidad. Para ferias y eventos: 'tipoFormularios' dice si la persona entro solo por feria, primero por feria o despues; 'feriaComprada' marca ferias donde UCEMA no estuvo; 'admitido' separa admitidos en el termino de los de otro termino. Con metricas=true cada fila trae admitidos, capitas y beca. Calidad de lead (reglas de admisiones): 'calidad' da alta/media/media_baja/mala; 'motivoCalidad' dice por que no llego a alta; 'tipoColegio', 'rangoDni' y 'cantCarreras' son los criterios sueltos; 'contactabilidad' separa con_respuesta de sin_respuesta. Para una campaña usar el filtro 'campana'.",
       inputSchema: {
         por: z
           .enum([
@@ -376,6 +383,12 @@ function crearServidor() {
             "formularioInscripcion",
             "soloInscripcion",
             "dniOrigen",
+            "calidad",
+            "motivoCalidad",
+            "tipoColegio",
+            "rangoDni",
+            "cantCarreras",
+            "contactabilidad",
           ])
           .describe("Dimension principal de agrupacion."),
 
@@ -405,6 +418,12 @@ function crearServidor() {
             "formularioInscripcion",
             "soloInscripcion",
             "dniOrigen",
+            "calidad",
+            "motivoCalidad",
+            "tipoColegio",
+            "rangoDni",
+            "cantCarreras",
+            "contactabilidad",
           ])
           .nullish()
           .describe(
@@ -436,6 +455,13 @@ function crearServidor() {
           .nullish()
           .describe(
             "true agrega por fila: personas, admitidos en el termino, tasaAdmision, capitas, admitidosConBeca, becaPromedioPct y capitasBecadas. Cuenta personas, no formularios."
+          ),
+
+        terminoObjetivo: z
+          .string()
+          .nullish()
+          .describe(
+            "Termino contra el que se mide la calidad (dimension 'calidad'/'motivoCalidad'). Default: el termino filtrado, o 2027S1. Ingreso un año o mas posterior = mala."
           ),
       },
     },
