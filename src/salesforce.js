@@ -13,6 +13,7 @@ import {
   contarEmbudo,
   tasas,
   canonSemestre,
+  maskTel,
 } from "./transform.js";
 import { datosFeria, enriquecerPersonas } from "./atribucion.js";
 import {
@@ -1486,6 +1487,21 @@ export async function cargarLeads(
 
         item.dni =
           dni || null;
+
+        // Telefono y mail sin enmascarar, como propiedades NO
+        // enumerables: no se serializan en ninguna respuesta. Solo
+        // los usa buscar_leads con telefonoCompleto=true, si
+        // PERMITIR_TELEFONO_COMPLETO lo habilita.
+        Object.defineProperties(item, {
+          telefonoSinMascara: {
+            value: maskTel(r.Telefono__c, false) || null,
+            enumerable: false,
+          },
+          emailSinMascara: {
+            value: (r.Correo_electronico__c || "").trim() || null,
+            enumerable: false,
+          },
+        });
 
         item.idCandidato =
           r.Candidato__c ||

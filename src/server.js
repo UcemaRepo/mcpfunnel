@@ -20,6 +20,7 @@ import {
   contarEmbudo,
   tasas,
   coincideEstado,
+  normalizar,
 } from "./transform.js";
 
 import { montarMcp } from "./mcp.js";
@@ -162,6 +163,39 @@ function errorResponse(
       error?.message ||
       String(error),
   });
+}
+
+const siNoQuery = (v) =>
+  v === true || v === "true" || v === "si" || v === "1";
+
+const telefonoCompletoPermitido = () =>
+  ["true", "1"].includes(process.env.PERMITIR_TELEFONO_COMPLETO);
+
+// Arma cada lead de /leads: con telefonoCompleto reemplaza el
+// telefono y el mail enmascarados por los completos; con
+// compacto deja solo los campos para armar bases de contacto.
+function salidaLead(l, { compacto, conTelefono }) {
+  const telefono = conTelefono
+    ? l.telefonoSinMascara ?? l.telefono
+    : l.telefono;
+  const email = conTelefono ? l.emailSinMascara ?? l.email : l.email;
+
+  if (!compacto) return { ...l, telefono, email };
+
+  return {
+    idCandidato: l.idCandidato ?? null,
+    nombre: `${l.nombre || ""} ${l.apellido || ""}`.trim(),
+    dni: l.dni ?? null,
+    telefono,
+    email,
+    colegio: l.colegio,
+    programa: l.programa,
+    semestre: l.semestre,
+    estado: l.estado,
+    origen: l.origen,
+    asesor: l.asesor,
+    formulariosPersona: l.formulariosPersona ?? null,
+  };
 }
 
 function getSesion() {
@@ -1034,11 +1068,33 @@ app.get(
           );
       }
 
+      // Asesor (o parte del nombre), sin importar tildes. Va
+      // antes de porPersona y del paginado, asi total y
+      // siguienteOffset cuentan solo los leads del asesor.
+      if (req.query.asesor) {
+        const a = normalizar(req.query.asesor);
+        leads = leads.filter((l) =>
+          normalizar(l.asesor).includes(a)
+        );
+      }
+
       leads =
         aplicarFiltrosExtra(
           leads,
           req.query
         );
+
+      // Telefono y mail completos: solo si en Render esta
+      // PERMITIR_TELEFONO_COMPLETO (hay menores en la base).
+      const conTelefono = siNoQuery(req.query.telefonoCompleto);
+      if (conTelefono && !telefonoCompletoPermitido()) {
+        return res.status(403).json({
+          ok: false,
+          error:
+            "telefonoCompleto no esta habilitado. Hay que cargar PERMITIR_TELEFONO_COMPLETO=true en Render.",
+        });
+      }
+      const compacto = siNoQuery(req.query.compacto);
 
       // ------------------------------------------------------
       // Paginado
@@ -1078,10 +1134,9 @@ app.get(
         );
 
       const pagina =
-        leads.slice(
-          offset,
-          offset + limite
-        );
+        leads
+          .slice(offset, offset + limite)
+          .map((l) => salidaLead(l, { compacto, conTelefono }));
 
       return ok(res, {
         total,

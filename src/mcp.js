@@ -342,6 +342,21 @@ function crearServidor() {
           .nullish()
           .describe("Origen del formulario o parte, ej. 'Ferias', 'Evento'."),
 
+        asesor: z
+          .string()
+          .nullish()
+          .describe("Asesor o parte del nombre, sin importar tildes. Ej. 'Julieta', 'Belerenian'."),
+
+        compacto: z
+          .boolean()
+          .nullish()
+          .describe("true = devuelve solo los campos para armar bases de contacto (nombre, dni, telefono, email, colegio, programa, semestre, estado, origen, asesor)."),
+
+        telefonoCompleto: z
+          .boolean()
+          .nullish()
+          .describe("true = devuelve telefono y mail sin enmascarar. Solo funciona si el servidor tiene PERMITIR_TELEFONO_COMPLETO=true; si no, responde 403."),
+
         ...filtrosAtribucion,
 
         limite: z
