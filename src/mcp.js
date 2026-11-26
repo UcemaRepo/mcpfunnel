@@ -64,6 +64,14 @@ const salida = (obj) => ({
   ],
 });
 
+// Booleano tolerante: acepta true/false o el texto "true"/"1",
+// porque algunos clientes MCP mandan los booleanos como string.
+const bool = z
+  .union([z.boolean(), z.string()])
+  .nullable()
+  .optional()
+  .transform((v) => v === true || v === "true" || v === "1");
+
 // Filtros de cohorte compartidos
 const filtroCohorte = {
   termino: z
@@ -347,15 +355,9 @@ function crearServidor() {
           .nullish()
           .describe("Asesor o parte del nombre, sin importar tildes. Ej. 'Julieta', 'Belerenian'."),
 
-        compacto: z
-          .boolean()
-          .nullish()
-          .describe("true = devuelve solo los campos para armar bases de contacto (nombre, dni, telefono, email, colegio, programa, semestre, estado, origen, asesor)."),
+        compacto: bool.describe("true = devuelve solo los campos para armar bases de contacto (nombre, dni, telefono, email, colegio, programa, semestre, estado, origen, asesor)."),
 
-        telefonoCompleto: z
-          .boolean()
-          .nullish()
-          .describe("true = devuelve telefono y mail sin enmascarar. Solo funciona si el servidor tiene PERMITIR_TELEFONO_COMPLETO=true; si no, responde 403."),
+        telefonoCompleto: bool.describe("true = devuelve telefono y mail sin enmascarar. Solo funciona si el servidor tiene PERMITIR_TELEFONO_COMPLETO=true; si no, responde 403."),
 
         ...filtrosAtribucion,
 
